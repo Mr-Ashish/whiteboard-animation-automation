@@ -8,14 +8,15 @@ from top-left to bottom-right at 30-degree angle
 import cv2
 import numpy as np
 import sys
+import random
 from pathlib import Path
 
 # Configuration
-WIDTH = 1920
-HEIGHT = 1080
+WIDTH = 1080
+HEIGHT = 1920
 FPS = 60
-REVEAL_DURATION = 1.5  # seconds for the reveal animation
-TOTAL_DURATION = 4.0   # total video duration (reveal + hold at end)
+REVEAL_DURATION = 3.0  # seconds for the reveal animation
+TOTAL_DURATION = 6.0   # total video duration (reveal + hold at end)
 ZIG_ZAG_AMPLITUDE = 350  # how far perpendicular to the diagonal path (pixels)
 PENCIL_SIZE = 350  # size of the pencil cursor if no image provided
 DIAGONAL_ANGLE = 45  # degrees from horizontal (top-left to bottom-right)
@@ -104,7 +105,7 @@ def create_simple_pencil_cursor(size):
     return cursor
 
 def generate_diagonal_zigzag_path(width, height, amplitude, angle_deg, reveal_duration, fps):
-    """Generate zig-zag path from top-left to bottom-right at specified angle"""
+    """Generate zig-zag path from top-left to bottom-right at specified angle with human-like movement"""
     total_frames = int(reveal_duration * fps)
     path = []
 
@@ -115,16 +116,28 @@ def generate_diagonal_zigzag_path(width, height, amplitude, angle_deg, reveal_du
     dx = np.cos(angle_rad)
     dy = np.sin(angle_rad)
 
-    # Calculate the diagonal distance we need to travel
-    # To go from top-left to bottom-right at angle
-    diagonal_length = np.sqrt(width**2 + height**2)
+    # Calculate the distance needed to fully cover the canvas
+    # Add extra distance to ensure full coverage (1.5x diagonal)
+    diagonal_length = np.sqrt(width**2 + height**2) * 1.5
 
-    # Start position (top-left)
-    start_x = 0
-    start_y = 0
+    # Start position (offset to left and up for smooth entry)
+    start_x = -200
+    start_y = -200
+
+    # Pre-generate smooth amplitude variations
+    np.random.seed(42)  # For reproducible smooth randomness
+    amplitude_variations = np.random.uniform(0.8, 1.2, total_frames)
+    # Smooth out variations with moving average
+    window = 15
+    amplitude_variations = np.convolve(amplitude_variations, np.ones(window)/window, mode='same')
 
     for frame in range(total_frames):
-        progress = frame / total_frames
+        # Linear progress
+        linear_progress = frame / total_frames
+
+        # Apply ease-in-out for natural acceleration/deceleration
+        # Smooth S-curve (smoothstep function)
+        progress = linear_progress * linear_progress * (3 - 2 * linear_progress)
 
         # Position along the diagonal
         dist_along_diagonal = progress * diagonal_length
@@ -136,17 +149,20 @@ def generate_diagonal_zigzag_path(width, height, amplitude, angle_deg, reveal_du
         perp_x = -dy
         perp_y = dx
 
-        # Zig-zag with multiple oscillations
-        frequency = 3  # number of complete zig-zags
-        zig_offset = amplitude * np.sin(frequency * progress * 2 * np.pi)
+        # Zig-zag with multiple oscillations and smooth variation
+        frequency = 4  # number of complete zig-zags
 
-        # Final position
-        x = int(base_x + zig_offset * perp_x)
-        y = int(base_y + zig_offset * perp_y)
+        # Use pre-generated smooth amplitude variation
+        amplitude_variation = amplitude * amplitude_variations[frame]
+        zig_offset = amplitude_variation * np.sin(frequency * progress * 2 * np.pi)
 
-        # Clamp to image bounds
-        x = max(0, min(width - 1, x))
-        y = max(0, min(height - 1, y))
+        # Calculate base position with zig-zag
+        pos_x = base_x + zig_offset * perp_x
+        pos_y = base_y + zig_offset * perp_y
+
+        # Final position (don't clamp - let cursor move off-screen naturally)
+        x = int(pos_x)
+        y = int(pos_y)
 
         path.append((x, y))
 
@@ -185,6 +201,7 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
     print(f"Loading image: {image_path}")
     main_image = load_and_resize_image(image_path, WIDTH, HEIGHT)
 
+
     # Generate zig-zag path
     print(f"Generating diagonal zig-zag path at {DIAGONAL_ANGLE}° angle...")
     reveal_frames = int(REVEAL_DURATION * FPS)
@@ -218,27 +235,52 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
         for c in range(3):
             frame[:, :, c] = np.where(reveal_mask > 0, main_image[:, :, c], white_canvas[:, :, c])
 
-        # Overlay pencil cursor with alpha blending
+        # Overlay pencil cursor with alpha blending and fade-in/fade-out
+        # Fade in cursor during first 20 frames for smooth appearance
+        fade_in_frames = 20
+        fade_out_frames = 20
+
+        if frame_idx < fade_in_frames:
+            # Fade in at the start
+            cursor_alpha_multiplier = frame_idx / fade_in_frames
+        elif frame_idx > reveal_frames - fade_out_frames:
+            # Fade out at the end
+            frames_from_end = reveal_frames - frame_idx
+            cursor_alpha_multiplier = frames_from_end / fade_out_frames
+        else:
+            # Full opacity in the middle
+            cursor_alpha_multiplier = 1.0
+
         cursor_half = pencil_cursor_size // 2
+
+        # Calculate frame bounds
         y1 = max(0, cursor_y - cursor_half)
         y2 = min(HEIGHT, cursor_y + cursor_half)
         x1 = max(0, cursor_x - cursor_half)
         x2 = min(WIDTH, cursor_x + cursor_half)
 
-        # Adjust cursor region to match frame region
-        cy1 = cursor_half - (cursor_y - y1)
-        cy2 = cursor_half + (y2 - cursor_y)
-        cx1 = cursor_half - (cursor_x - x1)
-        cx2 = cursor_half + (x2 - cursor_x)
+        # Only draw cursor if it's at least partially visible
+        if y2 > y1 and x2 > x1:
+            # Calculate cursor region bounds
+            cy1 = max(0, cursor_half - (cursor_y - y1))
+            cy2 = min(pencil_cursor_size, cursor_half + (y2 - cursor_y))
+            cx1 = max(0, cursor_half - (cursor_x - x1))
+            cx2 = min(pencil_cursor_size, cursor_half + (x2 - cursor_x))
 
-        cursor_region = pencil_cursor[cy1:cy2, cx1:cx2]
-        if cursor_region.shape[0] > 0 and cursor_region.shape[1] > 0:
-            alpha = cursor_region[:, :, 3:] / 255.0
-            for c in range(3):
-                frame[y1:y2, x1:x2, c] = (
-                    alpha[:, :, 0] * cursor_region[:, :, c] +
-                    (1 - alpha[:, :, 0]) * frame[y1:y2, x1:x2, c]
-                )
+            # Ensure regions are valid
+            if cy2 > cy1 and cx2 > cx1:
+                cursor_region = pencil_cursor[cy1:cy2, cx1:cx2]
+                frame_region_h = y2 - y1
+                frame_region_w = x2 - x1
+
+                # Double check dimensions match
+                if cursor_region.shape[0] == frame_region_h and cursor_region.shape[1] == frame_region_w:
+                    alpha = (cursor_region[:, :, 3:] / 255.0) * cursor_alpha_multiplier
+                    for c in range(3):
+                        frame[y1:y2, x1:x2, c] = (
+                            alpha[:, :, 0] * cursor_region[:, :, c] +
+                            (1 - alpha[:, :, 0]) * frame[y1:y2, x1:x2, c]
+                        )
 
         out.write(frame)
 
