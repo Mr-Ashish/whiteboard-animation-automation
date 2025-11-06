@@ -39,6 +39,25 @@ venv\Scripts\activate  # On Windows
 pip install -r requirements.txt
 ```
 
+## Quick Start with Shell Script
+
+For a quick one-command execution, use the provided shell script with JSON input:
+
+```bash
+# Basic usage
+./run.sh '{"images":[{"url":"https://example.com/image1.jpg","seconds":5},{"url":"https://example.com/image2.jpg","seconds":3}],"audio":"https://example.com/music.mp3"}'
+
+# Without audio
+./run.sh '{"images":[{"url":"https://example.com/image1.jpg","seconds":5}]}'
+```
+
+The script will:
+- Create and activate virtual environment automatically
+- Install dependencies if needed
+- Generate video from provided JSON
+- Upload to S3 (requires `.env` configuration)
+- Clean up temporary files
+
 ### AWS S3 Upload Setup (Optional)
 
 If you want to upload videos to AWS S3:
