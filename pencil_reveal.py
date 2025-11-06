@@ -2,326 +2,154 @@
 """
 Diagonal zig-zag pencil drawing reveal animation
 Creates a video where an image is revealed with a hand/pencil cursor moving in zig-zag pattern
-from top-left to bottom-right at 30-degree angle
+from top-left to bottom-right at 45-degree angle
+
+Supports both single image and multi-image array modes with automatic cleanup
 """
 
-import cv2
-import numpy as np
 import sys
-import random
+import json
 from pathlib import Path
+from src.config import PENCIL_SIZE, TEMP_DIR
+from src.cursor_utils import load_pencil_cursor, create_simple_pencil_cursor
+from src.video_writer import create_reveal_video, create_multi_reveal_video
+from src.download_utils import is_url
+from src.cleanup_utils import CleanupManager
 
-# Configuration
-WIDTH = 1080
-HEIGHT = 1920
-FPS = 60
-REVEAL_DURATION = 3.0  # seconds for the reveal animation
-TOTAL_DURATION = 6.0   # total video duration (reveal + hold at end)
-ZIG_ZAG_AMPLITUDE = 350  # how far perpendicular to the diagonal path (pixels)
-PENCIL_SIZE = 350  # size of the pencil cursor if no image provided
-DIAGONAL_ANGLE = 45  # degrees from horizontal (top-left to bottom-right)
-
-def load_and_resize_image(image_path, target_width, target_height):
-    """Load image and fit it to canvas with letterboxing"""
-    img = cv2.imread(str(image_path))
-    if img is None:
-        raise ValueError(f"Could not load image: {image_path}")
-
-    # Create white canvas
-    canvas = np.ones((target_height, target_width, 3), dtype=np.uint8) * 255
-
-    # Calculate scaling to fit image
-    img_h, img_w = img.shape[:2]
-    scale = min(target_width / img_w, target_height / img_h)
-
-    new_w = int(img_w * scale)
-    new_h = int(img_h * scale)
-
-    # Resize image
-    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-
-    # Center on canvas
-    x_offset = (target_width - new_w) // 2
-    y_offset = (target_height - new_h) // 2
-    canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
-
-    return canvas
-
-def load_pencil_cursor(pencil_path, size):
-    """Load hand/pencil cursor image with transparency"""
-    cursor = cv2.imread(str(pencil_path), cv2.IMREAD_UNCHANGED)
-
-    if cursor is None:
-        raise ValueError(f"Could not load pencil cursor image: {pencil_path}")
-
-    # Add alpha channel if not present
-    if cursor.shape[2] == 3:
-        # Add fully opaque alpha channel
-        alpha = np.ones((cursor.shape[0], cursor.shape[1], 1), dtype=np.uint8) * 255
-        cursor = np.concatenate([cursor, alpha], axis=2)
-
-    # Resize to desired size maintaining aspect ratio
-    h, w = cursor.shape[:2]
-    scale = size / max(h, w)
-    new_w = int(w * scale)
-    new_h = int(h * scale)
-
-    cursor = cv2.resize(cursor, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-
-    # Pad to square if needed
-    if new_w != new_h:
-        padded = np.zeros((size, size, 4), dtype=np.uint8)
-        y_offset = (size - new_h) // 2
-        x_offset = (size - new_w) // 2
-        padded[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = cursor
-        cursor = padded
-
-    return cursor
-
-def create_simple_pencil_cursor(size):
-    """Create a simple pencil hand cursor fallback"""
-    cursor = np.zeros((size, size, 4), dtype=np.uint8)
-    center = size // 2
-
-    # Draw a pencil-like shape pointing down-right
-    # Wood part (hexagonal body)
-    pts = np.array([
-        [center-15, center-30],
-        [center+15, center-30],
-        [center+20, center+10],
-        [center, center+40],
-        [center-20, center+10]
-    ], np.int32)
-    cv2.fillPoly(cursor, [pts], (180, 140, 80, 255))
-
-    # Tip (darker)
-    tip_pts = np.array([
-        [center-10, center+10],
-        [center+10, center+10],
-        [center, center+40]
-    ], np.int32)
-    cv2.fillPoly(cursor, [tip_pts], (40, 40, 40, 255))
-
-    return cursor
-
-def generate_diagonal_zigzag_path(width, height, amplitude, angle_deg, reveal_duration, fps):
-    """Generate zig-zag path from top-left to bottom-right at specified angle with human-like movement"""
-    total_frames = int(reveal_duration * fps)
-    path = []
-
-    # Convert angle to radians
-    angle_rad = np.radians(angle_deg)
-
-    # Calculate diagonal direction vector
-    dx = np.cos(angle_rad)
-    dy = np.sin(angle_rad)
-
-    # Calculate the distance needed to fully cover the canvas
-    # Add extra distance to ensure full coverage (1.5x diagonal)
-    diagonal_length = np.sqrt(width**2 + height**2) * 1.5
-
-    # Start position (offset to left and up for smooth entry)
-    start_x = -200
-    start_y = -200
-
-    # Pre-generate smooth amplitude variations
-    np.random.seed(42)  # For reproducible smooth randomness
-    amplitude_variations = np.random.uniform(0.8, 1.2, total_frames)
-    # Smooth out variations with moving average
-    window = 15
-    amplitude_variations = np.convolve(amplitude_variations, np.ones(window)/window, mode='same')
-
-    for frame in range(total_frames):
-        # Linear progress
-        linear_progress = frame / total_frames
-
-        # Apply ease-in-out for natural acceleration/deceleration
-        # Smooth S-curve (smoothstep function)
-        progress = linear_progress * linear_progress * (3 - 2 * linear_progress)
-
-        # Position along the diagonal
-        dist_along_diagonal = progress * diagonal_length
-        base_x = start_x + dist_along_diagonal * dx
-        base_y = start_y + dist_along_diagonal * dy
-
-        # Add zig-zag perpendicular to the diagonal
-        # Perpendicular vector (rotate 90 degrees)
-        perp_x = -dy
-        perp_y = dx
-
-        # Zig-zag with multiple oscillations and smooth variation
-        frequency = 4  # number of complete zig-zags
-
-        # Use pre-generated smooth amplitude variation
-        amplitude_variation = amplitude * amplitude_variations[frame]
-        zig_offset = amplitude_variation * np.sin(frequency * progress * 2 * np.pi)
-
-        # Calculate base position with zig-zag
-        pos_x = base_x + zig_offset * perp_x
-        pos_y = base_y + zig_offset * perp_y
-
-        # Final position (don't clamp - let cursor move off-screen naturally)
-        x = int(pos_x)
-        y = int(pos_y)
-
-        path.append((x, y))
-
-    return path
-
-def create_diagonal_reveal_mask(width, height, cursor_x, cursor_y, angle_deg):
-    """Create a mask for revealing the image along a diagonal line"""
-    # Convert angle to radians
-    angle_rad = np.radians(angle_deg)
-
-    # Create coordinate grids
-    x_coords = np.arange(width)
-    y_coords = np.arange(height)
-    xx, yy = np.meshgrid(x_coords, y_coords)
-
-    # Vector from cursor to each point
-    vx = xx - cursor_x
-    vy = yy - cursor_y
-
-    # Diagonal direction vector
-    dx = np.cos(angle_rad)
-    dy = np.sin(angle_rad)
-
-    # Project onto diagonal direction
-    # If negative, point is behind the cursor (should be revealed)
-    projection = vx * dx + vy * dy
-
-    # Create mask
-    mask = (projection <= 0).astype(np.uint8) * 255
-
-    return mask
-
-def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_size):
-    """Create the diagonal zig-zag reveal animation video"""
-    # Load and prepare image
-    print(f"Loading image: {image_path}")
-    main_image = load_and_resize_image(image_path, WIDTH, HEIGHT)
-
-
-    # Generate zig-zag path
-    print(f"Generating diagonal zig-zag path at {DIAGONAL_ANGLE}° angle...")
-    reveal_frames = int(REVEAL_DURATION * FPS)
-    hold_frames = int((TOTAL_DURATION - REVEAL_DURATION) * FPS)
-    path = generate_diagonal_zigzag_path(WIDTH, HEIGHT, ZIG_ZAG_AMPLITUDE, DIAGONAL_ANGLE, REVEAL_DURATION, FPS)
-
-    # Setup video writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path), fourcc, FPS, (WIDTH, HEIGHT))
-
-    if not out.isOpened():
-        raise ValueError(f"Could not open video writer for: {output_path}")
-
-    print(f"Creating video: {output_path}")
-    print(f"Reveal duration: {REVEAL_DURATION}s, Total duration: {TOTAL_DURATION}s")
-
-    # Create frames
-    white_canvas = np.ones((HEIGHT, WIDTH, 3), dtype=np.uint8) * 255
-
-    for frame_idx in range(reveal_frames):
-        # Start with white canvas
-        frame = white_canvas.copy()
-
-        # Get current cursor position
-        cursor_x, cursor_y = path[frame_idx]
-
-        # Create diagonal reveal mask
-        reveal_mask = create_diagonal_reveal_mask(WIDTH, HEIGHT, cursor_x, cursor_y, DIAGONAL_ANGLE)
-
-        # Apply mask to reveal image
-        for c in range(3):
-            frame[:, :, c] = np.where(reveal_mask > 0, main_image[:, :, c], white_canvas[:, :, c])
-
-        # Overlay pencil cursor with alpha blending and fade-in/fade-out
-        # Fade in cursor during first 20 frames for smooth appearance
-        fade_in_frames = 20
-        fade_out_frames = 20
-
-        if frame_idx < fade_in_frames:
-            # Fade in at the start
-            cursor_alpha_multiplier = frame_idx / fade_in_frames
-        elif frame_idx > reveal_frames - fade_out_frames:
-            # Fade out at the end
-            frames_from_end = reveal_frames - frame_idx
-            cursor_alpha_multiplier = frames_from_end / fade_out_frames
-        else:
-            # Full opacity in the middle
-            cursor_alpha_multiplier = 1.0
-
-        cursor_half = pencil_cursor_size // 2
-
-        # Calculate frame bounds
-        y1 = max(0, cursor_y - cursor_half)
-        y2 = min(HEIGHT, cursor_y + cursor_half)
-        x1 = max(0, cursor_x - cursor_half)
-        x2 = min(WIDTH, cursor_x + cursor_half)
-
-        # Only draw cursor if it's at least partially visible
-        if y2 > y1 and x2 > x1:
-            # Calculate cursor region bounds
-            cy1 = max(0, cursor_half - (cursor_y - y1))
-            cy2 = min(pencil_cursor_size, cursor_half + (y2 - cursor_y))
-            cx1 = max(0, cursor_half - (cursor_x - x1))
-            cx2 = min(pencil_cursor_size, cursor_half + (x2 - cursor_x))
-
-            # Ensure regions are valid
-            if cy2 > cy1 and cx2 > cx1:
-                cursor_region = pencil_cursor[cy1:cy2, cx1:cx2]
-                frame_region_h = y2 - y1
-                frame_region_w = x2 - x1
-
-                # Double check dimensions match
-                if cursor_region.shape[0] == frame_region_h and cursor_region.shape[1] == frame_region_w:
-                    alpha = (cursor_region[:, :, 3:] / 255.0) * cursor_alpha_multiplier
-                    for c in range(3):
-                        frame[y1:y2, x1:x2, c] = (
-                            alpha[:, :, 0] * cursor_region[:, :, c] +
-                            (1 - alpha[:, :, 0]) * frame[y1:y2, x1:x2, c]
-                        )
-
-        out.write(frame)
-
-        # Progress indicator
-        if frame_idx % 30 == 0:
-            print(f"Progress: {frame_idx}/{reveal_frames} frames ({frame_idx*100//reveal_frames}%)")
-
-    # Hold the final fully revealed image
-    print("Adding hold frames with full image...")
-    for _ in range(hold_frames):
-        out.write(main_image)
-
-    out.release()
-    print(f"✓ Video created successfully: {output_path}")
 
 def main():
+    """Main entry point for the pencil reveal animation tool"""
     if len(sys.argv) < 2:
-        print("Usage: python pencil_reveal.py <input_image> [hand_pencil_image] [output_video.mp4]")
-        print("Example: python pencil_reveal.py image_1.png hand_pencil.png output.mp4")
-        print("         python pencil_reveal.py image_1.png output.mp4  (uses default cursor)")
+        print("Usage:")
+        print("  Single image mode:")
+        print("    python pencil_reveal.py <input_image> [hand_pencil_image] [output_video.mp4]")
+        print("    Example: python pencil_reveal.py image.png hand_pencil.png output.mp4")
+        print("    Example: python pencil_reveal.py https://example.com/image.jpg output.mp4")
+        print()
+        print("  Multi-image mode:")
+        print("    python pencil_reveal.py --multi <config.json> [hand_pencil_image] [output_video.mp4]")
+        print("    Example: python pencil_reveal.py --multi config.json hand_pencil.png output.mp4")
+        print()
+        print("  Config JSON format for multi-image mode:")
+        print('    [')
+        print('      {"image": "path/to/image1.png", "seconds": 5},')
+        print('      {"image": "https://example.com/image2.png", "seconds": 3}')
+        print('    ]')
+        print()
+        print("  Note: Both local file paths and image URLs are supported")
+        print("  Output videos are saved to output/ directory")
         sys.exit(1)
 
-    input_image = Path(sys.argv[1])
+    # Check for multi-image mode
+    if sys.argv[1] == '--multi':
+        _handle_multi_image_mode()
+    else:
+        _handle_single_image_mode()
+
+
+def _handle_single_image_mode():
+    """Handle single image mode processing with cleanup"""
+    input_image_arg = sys.argv[1]
 
     # Determine arguments
     if len(sys.argv) >= 3 and Path(sys.argv[2]).suffix.lower() in ['.png', '.jpg', '.jpeg']:
         # Hand pencil image provided
         hand_pencil_path = Path(sys.argv[2])
-        output_video = Path(sys.argv[3]) if len(sys.argv) > 3 else Path("pencil_reveal.mp4")
+        output_video = sys.argv[3] if len(sys.argv) > 3 else "pencil_reveal.mp4"
         use_custom_cursor = True
     else:
         # No hand pencil image
         hand_pencil_path = None
-        output_video = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("pencil_reveal.mp4")
+        output_video = sys.argv[2] if len(sys.argv) > 2 else "pencil_reveal.mp4"
         use_custom_cursor = False
 
-    if not input_image.exists():
-        print(f"Error: Input image not found: {input_image}")
-        sys.exit(1)
+    # Validate input (URL or local path)
+    if not is_url(input_image_arg):
+        input_path = Path(input_image_arg)
+        if not input_path.exists():
+            print(f"Error: Input image not found: {input_image_arg}")
+            sys.exit(1)
 
     # Load or create pencil cursor
+    pencil_cursor, cursor_size = _load_cursor(hand_pencil_path, use_custom_cursor)
+
+    # Generate video with cleanup
+    with CleanupManager(TEMP_DIR) as cleanup:
+        create_reveal_video(input_image_arg, output_video, pencil_cursor, cursor_size,
+                          cleanup_manager=cleanup)
+    print("\n✓ Cleanup complete - all temporary files removed")
+
+
+def _handle_multi_image_mode():
+    """Handle multi-image mode processing with cleanup"""
+    if len(sys.argv) < 3:
+        print("Error: Config JSON file required for multi-image mode")
+        sys.exit(1)
+
+    config_path = Path(sys.argv[2])
+
+    if not config_path.exists():
+        print(f"Error: Config file not found: {config_path}")
+        sys.exit(1)
+
+    # Load config
+    try:
+        with open(config_path, 'r') as f:
+            image_configs = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in config file: {e}")
+        sys.exit(1)
+
+    if not isinstance(image_configs, list):
+        print("Error: Config JSON must be an array of objects")
+        sys.exit(1)
+
+    # Validate image paths and URLs
+    for idx, config in enumerate(image_configs):
+        if 'image' not in config:
+            print(f"Error: Missing 'image' key in config at index {idx}")
+            sys.exit(1)
+
+        image_arg = config['image']
+        # Only validate local paths, URLs will be validated during download
+        if not is_url(image_arg):
+            image_path = Path(image_arg)
+            if not image_path.exists():
+                print(f"Error: Image not found: {image_arg}")
+                sys.exit(1)
+
+    # Determine cursor and output arguments
+    if len(sys.argv) >= 4 and Path(sys.argv[3]).suffix.lower() in ['.png', '.jpg', '.jpeg']:
+        # Hand pencil image provided
+        hand_pencil_path = Path(sys.argv[3])
+        output_video = sys.argv[4] if len(sys.argv) > 4 else "multi_reveal.mp4"
+        use_custom_cursor = True
+    else:
+        # No hand pencil image
+        hand_pencil_path = None
+        output_video = sys.argv[3] if len(sys.argv) > 3 else "multi_reveal.mp4"
+        use_custom_cursor = False
+
+    # Load or create pencil cursor
+    pencil_cursor, cursor_size = _load_cursor(hand_pencil_path, use_custom_cursor)
+
+    # Generate video with cleanup
+    with CleanupManager(TEMP_DIR) as cleanup:
+        create_multi_reveal_video(image_configs, output_video, pencil_cursor, cursor_size,
+                                cleanup_manager=cleanup)
+    print("\n✓ Cleanup complete - all temporary files removed")
+
+
+def _load_cursor(hand_pencil_path, use_custom_cursor):
+    """Load or create pencil cursor
+
+    Args:
+        hand_pencil_path: Path to custom cursor image (or None)
+        use_custom_cursor: Whether to use custom cursor
+
+    Returns:
+        tuple: (pencil_cursor, cursor_size)
+    """
     if use_custom_cursor and hand_pencil_path and hand_pencil_path.exists():
         print(f"Loading custom pencil cursor: {hand_pencil_path}")
         pencil_cursor = load_pencil_cursor(hand_pencil_path, PENCIL_SIZE)
@@ -331,27 +159,8 @@ def main():
         pencil_cursor = create_simple_pencil_cursor(PENCIL_SIZE)
         cursor_size = PENCIL_SIZE
 
-    # Generate video
-    create_reveal_video(input_image, output_video, pencil_cursor, cursor_size)
+    return pencil_cursor, cursor_size
 
-    print("\nConverting to H.264 (if ffmpeg available)...")
-    temp_output = output_video.with_suffix('.tmp.mp4')
-    import subprocess
-    try:
-        subprocess.run([
-            'ffmpeg', '-y', '-i', str(output_video),
-            '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
-            '-pix_fmt', 'yuv420p', str(temp_output)
-        ], check=True, capture_output=True)
-
-        # Replace original with converted
-        output_video.unlink()
-        temp_output.rename(output_video)
-        print(f"✓ Converted to H.264: {output_video}")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Warning: ffmpeg not found or failed. Video saved as mp4v codec.")
-        if temp_output.exists():
-            temp_output.unlink()
 
 if __name__ == "__main__":
     main()
