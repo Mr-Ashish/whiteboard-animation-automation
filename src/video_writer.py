@@ -10,6 +10,8 @@ from .config import (
 from .image_utils import load_and_resize_image
 from .animation import create_single_reveal_animation
 from .cleanup_utils import ensure_output_dir
+from .audio_utils import loop_audio_to_video_length
+from .aws_utils import upload_to_s3
 
 
 def write_frames_to_video(frames, output_path, show_progress=True):
@@ -72,7 +74,8 @@ def convert_to_h264(video_path):
 
 
 def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_size,
-                       reveal_duration=None, total_duration=None, cleanup_manager=None):
+                       reveal_duration=None, total_duration=None, cleanup_manager=None,
+                       audio_path=None, audio_volume=1.0, upload_to_aws=False):
     """Create the diagonal zig-zag reveal animation video for a single image
 
     Args:
@@ -83,9 +86,12 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
         reveal_duration: Duration of reveal animation in seconds (optional)
         total_duration: Total duration including hold time in seconds (optional)
         cleanup_manager: Optional CleanupManager for temp file cleanup
+        audio_path: Optional path to background music file (mp3, wav, etc.)
+        audio_volume: Audio volume level (0.0 to 1.0, default 1.0)
+        upload_to_aws: Whether to upload to AWS S3 (default False)
 
     Returns:
-        Path: Path to the created video file
+        tuple: (Path to video file, S3 URL if uploaded else None)
     """
     if reveal_duration is None:
         reveal_duration = DEFAULT_REVEAL_DURATION
@@ -115,11 +121,24 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
     # Convert to H.264
     convert_to_h264(Path(output_path))
 
-    return output_path
+    # Add background music if provided
+    if audio_path:
+        output_path = _add_audio_to_video(output_path, audio_path, audio_volume, cleanup_manager)
+
+    # Upload to S3 if requested
+    s3_url = None
+    if upload_to_aws:
+        try:
+            s3_url = upload_to_s3(output_path)
+        except Exception as e:
+            print(f"Warning: S3 upload failed: {e}")
+            print("Video saved locally only.")
+
+    return output_path, s3_url
 
 
 def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_cursor_size,
-                             cleanup_manager=None):
+                             cleanup_manager=None, audio_path=None, audio_volume=1.0, upload_to_aws=False):
     """Create a video with multiple image reveals stitched together
 
     Args:
@@ -132,9 +151,12 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
         pencil_cursor: Cursor image with alpha channel
         pencil_cursor_size: Size of cursor in pixels
         cleanup_manager: Optional CleanupManager for temp file cleanup
+        audio_path: Optional path to background music file (mp3, wav, etc.)
+        audio_volume: Audio volume level (0.0 to 1.0, default 1.0)
+        upload_to_aws: Whether to upload to AWS S3 (default False)
 
     Returns:
-        Path: Path to the created video file
+        tuple: (Path to video file, S3 URL if uploaded else None)
     """
     # Ensure output directory and resolve path
     output_path = _resolve_output_path(output_path)
@@ -174,7 +196,20 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
     # Convert to H.264
     convert_to_h264(Path(output_path))
 
-    return output_path
+    # Add background music if provided
+    if audio_path:
+        output_path = _add_audio_to_video(output_path, audio_path, audio_volume, cleanup_manager)
+
+    # Upload to S3 if requested
+    s3_url = None
+    if upload_to_aws:
+        try:
+            s3_url = upload_to_s3(output_path)
+        except Exception as e:
+            print(f"Warning: S3 upload failed: {e}")
+            print("Video saved locally only.")
+
+    return output_path, s3_url
 
 
 def _resolve_output_path(output_path):
@@ -196,3 +231,49 @@ def _resolve_output_path(output_path):
     ensure_output_dir(output_path)
 
     return output_path
+
+
+def _add_audio_to_video(video_path, audio_path, volume, cleanup_manager):
+    """Add background music to video and cleanup original
+
+    Args:
+        video_path: Path to video without audio
+        audio_path: Path to audio file
+        volume: Audio volume level
+        cleanup_manager: CleanupManager for temp file cleanup
+
+    Returns:
+        Path: Path to video with audio
+    """
+    video_path = Path(video_path)
+
+    # Create output path (replace original)
+    temp_video = video_path.parent / f"{video_path.stem}_no_audio{video_path.suffix}"
+
+    # Rename original video to temp
+    video_path.rename(temp_video)
+
+    # Register temp video for cleanup
+    if cleanup_manager:
+        cleanup_manager.register_temp_file(temp_video)
+
+    try:
+        # Add audio to create final video with original name
+        final_video = loop_audio_to_video_length(
+            temp_video,
+            audio_path,
+            output_path=video_path,
+            volume=volume
+        )
+
+        # Clean up the temp video without audio
+        if temp_video.exists():
+            temp_video.unlink()
+
+        return final_video
+
+    except Exception as e:
+        # If audio addition fails, restore original video
+        if temp_video.exists():
+            temp_video.rename(video_path)
+        raise e

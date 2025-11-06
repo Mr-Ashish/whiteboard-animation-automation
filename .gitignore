@@ -5,6 +5,9 @@ temp/
 output/*.mp4
 output/*.avi
 
+# Environment variables (contains AWS credentials)
+.env
+
 # Python
 __pycache__/
 *.py[cod]
