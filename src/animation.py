@@ -2,7 +2,7 @@
 
 import numpy as np
 from .config import (
-    WIDTH, HEIGHT, FPS, DIAGONAL_ANGLE,
+    FPS, DIAGONAL_ANGLE,
     CURSOR_FADE_IN_FRAMES, CURSOR_FADE_OUT_FRAMES
 )
 from .path_generator import generate_diagonal_zigzag_path, create_diagonal_reveal_mask
@@ -24,28 +24,30 @@ def create_single_reveal_animation(main_image, pencil_cursor, pencil_cursor_size
         list: List of frames (numpy.ndarray) for the animation
     """
     frames = []
-    white_canvas = np.ones((HEIGHT, WIDTH, 3), dtype=np.uint8) * 255
+    # Get dimensions from main_image
+    height, width = main_image.shape[:2]
+
+    # Create white canvas once (optimization)
+    white_canvas = np.ones((height, width, 3), dtype=np.uint8) * 255
 
     # Generate zig-zag path
     reveal_frames = int(reveal_duration * FPS)
     hold_frames = int((total_duration - reveal_duration) * FPS)
-    path = generate_diagonal_zigzag_path(WIDTH, HEIGHT, zig_zag_amplitude,
+    path = generate_diagonal_zigzag_path(width, height, zig_zag_amplitude,
                                         DIAGONAL_ANGLE, reveal_duration, FPS)
 
     # Create reveal frames
     for frame_idx in range(reveal_frames):
-        # Start with white canvas
-        frame = white_canvas.copy()
-
         # Get current cursor position
         cursor_x, cursor_y = path[frame_idx]
 
         # Create diagonal reveal mask
-        reveal_mask = create_diagonal_reveal_mask(WIDTH, HEIGHT, cursor_x, cursor_y, DIAGONAL_ANGLE)
+        reveal_mask = create_diagonal_reveal_mask(width, height, cursor_x, cursor_y, DIAGONAL_ANGLE)
 
-        # Apply mask to reveal image
-        for c in range(3):
-            frame[:, :, c] = np.where(reveal_mask > 0, main_image[:, :, c], white_canvas[:, :, c])
+        # Apply mask to reveal image (vectorized - faster than channel loop)
+        # Expand mask to 3 channels for broadcasting
+        mask_3d = (reveal_mask > 0)[:, :, np.newaxis]
+        frame = np.where(mask_3d, main_image, white_canvas)
 
         # Overlay pencil cursor with alpha blending and fade-in/fade-out
         cursor_alpha_multiplier = _calculate_cursor_alpha(frame_idx, reveal_frames)
@@ -99,11 +101,14 @@ def _draw_cursor_on_frame(frame, pencil_cursor, cursor_x, cursor_y,
     """
     cursor_half = pencil_cursor_size // 2
 
+    # Get frame dimensions
+    height, width = frame.shape[:2]
+
     # Calculate frame bounds
     y1 = max(0, cursor_y - cursor_half)
-    y2 = min(HEIGHT, cursor_y + cursor_half)
+    y2 = min(height, cursor_y + cursor_half)
     x1 = max(0, cursor_x - cursor_half)
-    x2 = min(WIDTH, cursor_x + cursor_half)
+    x2 = min(width, cursor_x + cursor_half)
 
     # Only draw cursor if it's at least partially visible
     if y2 > y1 and x2 > x1:

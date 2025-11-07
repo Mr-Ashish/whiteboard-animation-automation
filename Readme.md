@@ -44,11 +44,14 @@ pip install -r requirements.txt
 For a quick one-command execution, use the provided shell script with JSON input:
 
 ```bash
-# Basic usage
+# Basic usage (default: 9:16 vertical, 720p)
 ./run.sh '{"images":[{"url":"https://example.com/image1.jpg","seconds":5},{"url":"https://example.com/image2.jpg","seconds":3}],"audio":"https://example.com/music.mp3"}'
 
 # Without audio
 ./run.sh '{"images":[{"url":"https://example.com/image1.jpg","seconds":5}]}'
+
+# With custom aspect ratio and quality
+./run.sh '{"images":[{"url":"https://example.com/image1.jpg","seconds":5}],"audio":"https://example.com/music.mp3","ratio":"16:9","quality":"1080p"}'
 ```
 
 The script will:
@@ -136,9 +139,12 @@ Each object requires:
 
 ## Features
 
+- **Aspect Ratio Presets**: Choose from 16:9 (landscape), 9:16 (vertical), 1:1 (square), 4:5 (portrait), 4:3 (classic)
+- **Quality Presets**: 480p, 720p, 1080p, 1440p, 2160p (4K)
 - **URL Support**: Download images directly from URLs
 - **Background Music**: Add looping background music to videos (mp3, wav, etc.)
 - **AWS S3 Upload**: Automatically upload videos to S3 and get public URLs
+- **Performance Optimized**: 30 FPS default, vectorized operations for faster generation
 - **Auto Cleanup**: Temporary files are automatically removed after video generation
 - **Organized Output**: All videos saved to `output/` directory
 - **Modular Structure**: Clean separation of concerns in `src/` folder
@@ -146,13 +152,24 @@ Each object requires:
 
 ## Configuration
 
-Edit `src/config.py` to customize:
-- Video dimensions (WIDTH, HEIGHT)
+The default settings are optimized for performance and quality:
+- **Default Aspect Ratio**: 9:16 (vertical/portrait for social media)
+- **Default Quality**: 720p (HD, good balance of quality and speed)
+- **Frame Rate**: 30 FPS (smooth animation, fast generation)
+
+You can override these with CLI flags (`--ratio`, `--quality`) or edit `src/config.py` to customize:
+- Aspect ratio presets and defaults
+- Quality presets and defaults
 - Frame rate (FPS)
 - Animation durations
 - Zig-zag amplitude and angle
 - Cursor size
 - Output and temp directory paths
+
+**Performance Note**: Generation time is approximately:
+- 720p @ 30 FPS: ~1-2 minutes for 8 images (~90 seconds total video)
+- 1080p @ 30 FPS: ~2-3 minutes for 8 images
+- 480p @ 30 FPS: ~30-60 seconds for 8 images (fastest)
 
 ## Examples
 
@@ -168,6 +185,39 @@ python pencil_reveal.py https://picsum.photos/1080/1920 my_video.mp4
 # Single image with custom cursor from assets
 python pencil_reveal.py assets/image_3.png assets/hand_pencil.png my_video.mp4
 ```
+
+### With Aspect Ratio and Quality
+
+```bash
+# Landscape 16:9 in 1080p (e.g., YouTube)
+python pencil_reveal.py assets/image_3.png --ratio 16:9 --quality 1080p output.mp4
+
+# Vertical 9:16 in 720p (e.g., Instagram Stories, TikTok)
+python pencil_reveal.py assets/image_3.png --ratio 9:16 --quality 720p output.mp4
+
+# Square 1:1 in 1080p (e.g., Instagram Post)
+python pencil_reveal.py assets/image_3.png --ratio 1:1 --quality 1080p output.mp4
+
+# Portrait 4:5 in 720p (e.g., Instagram Feed)
+python pencil_reveal.py --multi config.json --ratio 4:5 --quality 720p output.mp4
+
+# 4K quality (2160p) - slower but highest quality
+python pencil_reveal.py assets/image_3.png --ratio 16:9 --quality 2160p output.mp4
+```
+
+**Available Aspect Ratios:**
+- `16:9` - Landscape (YouTube, TV)
+- `9:16` - Vertical/Portrait (Instagram Stories, TikTok) *[default]*
+- `1:1` - Square (Instagram Post)
+- `4:5` - Portrait (Instagram Feed)
+- `4:3` - Classic (Old TV)
+
+**Available Quality Presets:**
+- `480p` - 480 pixels height (fastest, smallest file)
+- `720p` - 720 pixels height (HD) *[default]*
+- `1080p` - 1080 pixels height (Full HD)
+- `1440p` - 1440 pixels height (2K)
+- `2160p` - 2160 pixels height (4K, slowest)
 
 ### With Background Music
 
@@ -216,11 +266,11 @@ python pencil_reveal.py assets/image_3.png --audio https://example.com/music.mp3
 # Multi-image with audio URL and S3 upload
 python pencil_reveal.py --multi config.json --audio https://example.com/music.mp3 --upload final.mp4
 
-# All features combined with local audio
-python pencil_reveal.py assets/image_3.png assets/hand_pencil.png --audio music.mp3 --volume 0.7 --upload my_video.mp4
+# All features combined
+python pencil_reveal.py assets/image_3.png assets/hand_pencil.png --audio https://example.com/music.mp3 --volume 0.7 --ratio 16:9 --quality 1080p --upload my_video.mp4
 
-# All features combined with audio URL
-python pencil_reveal.py assets/image_3.png assets/hand_pencil.png --audio https://example.com/music.mp3 --volume 0.7 --upload my_video.mp4
+# Multi-image with all options
+python pencil_reveal.py --multi config.json --audio https://example.com/music.mp3 --ratio 16:9 --quality 1080p --upload final.mp4
 ```
 
 **With `--upload` flag:**

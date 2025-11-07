@@ -9,8 +9,9 @@ Supports both single image and multi-image array modes with automatic cleanup
 
 import sys
 import json
+import uuid
 from pathlib import Path
-from src.config import PENCIL_SIZE, TEMP_DIR
+from src.config import PENCIL_SIZE, TEMP_DIR, calculate_dimensions, ASPECT_RATIOS, QUALITY_PRESETS
 from src.cursor_utils import load_pencil_cursor, create_simple_pencil_cursor
 from src.video_writer import create_reveal_video, create_multi_reveal_video
 from src.download_utils import is_url, resolve_audio_path
@@ -35,10 +36,18 @@ def main():
         print("    --audio <file>     Add background music (mp3, wav, etc.)")
         print("    --volume <0.0-1.0> Set audio volume (default: 1.0)")
         print("    --upload           Upload video to AWS S3 (requires .env config)")
+        print("    --ratio <ratio>    Aspect ratio (default: 9:16)")
+        print(f"                       Available: {', '.join(ASPECT_RATIOS.keys())}")
+        print("    --quality <qual>   Video quality (default: 720p)")
+        print(f"                       Available: {', '.join(QUALITY_PRESETS.keys())}")
         print()
         print("  Examples with audio:")
         print("    python pencil_reveal.py image.png --audio music.mp3 output.mp4")
         print("    python pencil_reveal.py --multi config.json --audio music.wav --volume 0.5 output.mp4")
+        print()
+        print("  Examples with aspect ratio and quality:")
+        print("    python pencil_reveal.py image.png --ratio 16:9 --quality 1080p output.mp4")
+        print("    python pencil_reveal.py --multi config.json --ratio 1:1 --quality 720p output.mp4")
         print()
         print("  Examples with AWS upload:")
         print("    python pencil_reveal.py image.png --upload output.mp4")
@@ -69,10 +78,12 @@ def _handle_single_image_mode():
     # Parse arguments
     hand_pencil_path = None
     use_custom_cursor = False
-    output_video = "pencil_reveal.mp4"
+    output_video = None  # Will be set to UUID if not provided
     audio_path = None
     audio_volume = 1.0
     upload_to_aws = False
+    aspect_ratio = None
+    quality = None
 
     i = 1
     while i < len(args):
@@ -81,6 +92,30 @@ def _handle_single_image_mode():
         if arg == '--upload':
             upload_to_aws = True
             i += 1
+
+        elif arg == '--ratio':
+            if i + 1 < len(args):
+                aspect_ratio = args[i + 1]
+                if aspect_ratio not in ASPECT_RATIOS:
+                    print(f"Error: Invalid aspect ratio '{aspect_ratio}'")
+                    print(f"Available: {', '.join(ASPECT_RATIOS.keys())}")
+                    sys.exit(1)
+                i += 2
+            else:
+                print("Error: --ratio requires a value")
+                sys.exit(1)
+
+        elif arg == '--quality':
+            if i + 1 < len(args):
+                quality = args[i + 1]
+                if quality not in QUALITY_PRESETS:
+                    print(f"Error: Invalid quality '{quality}'")
+                    print(f"Available: {', '.join(QUALITY_PRESETS.keys())}")
+                    sys.exit(1)
+                i += 2
+            else:
+                print("Error: --quality requires a value")
+                sys.exit(1)
 
         elif arg == '--audio':
             if i + 1 < len(args):
@@ -135,6 +170,11 @@ def _handle_single_image_mode():
             print(f"Error: Input image not found: {input_image_arg}")
             sys.exit(1)
 
+    # Generate UUID filename if not provided
+    if output_video is None:
+        output_video = f"{uuid.uuid4()}.mp4"
+        print(f"Generated filename: {output_video}")
+
     # Load or create pencil cursor
     pencil_cursor, cursor_size = _load_cursor(hand_pencil_path, use_custom_cursor)
 
@@ -149,7 +189,9 @@ def _handle_single_image_mode():
             cleanup_manager=cleanup,
             audio_path=audio_path,
             audio_volume=audio_volume,
-            upload_to_aws=upload_to_aws
+            upload_to_aws=upload_to_aws,
+            aspect_ratio=aspect_ratio,
+            quality=quality
         )
 
     print("\n✓ Cleanup complete - all temporary files removed")
@@ -205,10 +247,12 @@ def _handle_multi_image_mode():
     args = sys.argv[3:]
     hand_pencil_path = None
     use_custom_cursor = False
-    output_video = "multi_reveal.mp4"
+    output_video = None  # Will be set to UUID if not provided
     audio_path = None
     audio_volume = 1.0
     upload_to_aws = False
+    aspect_ratio = None
+    quality = None
 
     i = 0
     while i < len(args):
@@ -217,6 +261,30 @@ def _handle_multi_image_mode():
         if arg == '--upload':
             upload_to_aws = True
             i += 1
+
+        elif arg == '--ratio':
+            if i + 1 < len(args):
+                aspect_ratio = args[i + 1]
+                if aspect_ratio not in ASPECT_RATIOS:
+                    print(f"Error: Invalid aspect ratio '{aspect_ratio}'")
+                    print(f"Available: {', '.join(ASPECT_RATIOS.keys())}")
+                    sys.exit(1)
+                i += 2
+            else:
+                print("Error: --ratio requires a value")
+                sys.exit(1)
+
+        elif arg == '--quality':
+            if i + 1 < len(args):
+                quality = args[i + 1]
+                if quality not in QUALITY_PRESETS:
+                    print(f"Error: Invalid quality '{quality}'")
+                    print(f"Available: {', '.join(QUALITY_PRESETS.keys())}")
+                    sys.exit(1)
+                i += 2
+            else:
+                print("Error: --quality requires a value")
+                sys.exit(1)
 
         elif arg == '--audio':
             if i + 1 < len(args):
@@ -264,6 +332,11 @@ def _handle_multi_image_mode():
         else:
             i += 1
 
+    # Generate UUID filename if not provided
+    if output_video is None:
+        output_video = f"{uuid.uuid4()}.mp4"
+        print(f"Generated filename: {output_video}")
+
     # Load or create pencil cursor
     pencil_cursor, cursor_size = _load_cursor(hand_pencil_path, use_custom_cursor)
 
@@ -278,7 +351,9 @@ def _handle_multi_image_mode():
             cleanup_manager=cleanup,
             audio_path=audio_path,
             audio_volume=audio_volume,
-            upload_to_aws=upload_to_aws
+            upload_to_aws=upload_to_aws,
+            aspect_ratio=aspect_ratio,
+            quality=quality
         )
 
     print("\n✓ Cleanup complete - all temporary files removed")

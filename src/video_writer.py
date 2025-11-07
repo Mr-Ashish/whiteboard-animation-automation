@@ -5,7 +5,8 @@ import subprocess
 from pathlib import Path
 from .config import (
     WIDTH, HEIGHT, FPS, DEFAULT_REVEAL_DURATION,
-    DEFAULT_TOTAL_DURATION, ZIG_ZAG_AMPLITUDE, OUTPUT_DIR, TEMP_DIR
+    DEFAULT_TOTAL_DURATION, ZIG_ZAG_AMPLITUDE, OUTPUT_DIR, TEMP_DIR,
+    calculate_dimensions, calculate_cursor_size
 )
 from .image_utils import load_and_resize_image
 from .animation import create_single_reveal_animation
@@ -14,19 +15,26 @@ from .audio_utils import loop_audio_to_video_length
 from .aws_utils import upload_to_s3
 
 
-def write_frames_to_video(frames, output_path, show_progress=True):
+def write_frames_to_video(frames, output_path, width=None, height=None, show_progress=True):
     """Write frames to a video file
 
     Args:
         frames: List of frames (numpy.ndarray)
         output_path: Path to output video file
+        width: Video width (uses default WIDTH if None)
+        height: Video height (uses default HEIGHT if None)
         show_progress: Whether to show progress updates
 
     Returns:
         Path: Path to the created video file
     """
+    if width is None:
+        width = WIDTH
+    if height is None:
+        height = HEIGHT
+
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path), fourcc, FPS, (WIDTH, HEIGHT))
+    out = cv2.VideoWriter(str(output_path), fourcc, FPS, (width, height))
 
     if not out.isOpened():
         raise ValueError(f"Could not open video writer for: {output_path}")
@@ -75,7 +83,8 @@ def convert_to_h264(video_path):
 
 def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_size,
                        reveal_duration=None, total_duration=None, cleanup_manager=None,
-                       audio_path=None, audio_volume=1.0, upload_to_aws=False):
+                       audio_path=None, audio_volume=1.0, upload_to_aws=False,
+                       aspect_ratio=None, quality=None):
     """Create the diagonal zig-zag reveal animation video for a single image
 
     Args:
@@ -89,6 +98,8 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
         audio_path: Optional path to background music file (mp3, wav, etc.)
         audio_volume: Audio volume level (0.0 to 1.0, default 1.0)
         upload_to_aws: Whether to upload to AWS S3 (default False)
+        aspect_ratio: Aspect ratio (e.g., '16:9', '9:16', default None uses config default)
+        quality: Quality preset (e.g., '720p', '1080p', default None uses config default)
 
     Returns:
         tuple: (Path to video file, S3 URL if uploaded else None)
@@ -98,12 +109,27 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
     if total_duration is None:
         total_duration = DEFAULT_TOTAL_DURATION
 
+    # Calculate dimensions (handles None values with defaults)
+    width, height = calculate_dimensions(aspect_ratio, quality)
+    if aspect_ratio or quality:
+        print(f"Using dimensions: {width}x{height} ({aspect_ratio or 'default ratio'}, {quality or 'default quality'})")
+
+    # Scale cursor size based on dimensions
+    scaled_cursor_size = calculate_cursor_size(width, height)
+    if scaled_cursor_size != pencil_cursor_size:
+        print(f"Scaling cursor from {pencil_cursor_size}px to {scaled_cursor_size}px for {width}x{height}")
+        # Re-scale the cursor if it was already loaded
+        if pencil_cursor.shape[0] != scaled_cursor_size:
+            pencil_cursor = cv2.resize(pencil_cursor, (scaled_cursor_size, scaled_cursor_size),
+                                      interpolation=cv2.INTER_LANCZOS4)
+        pencil_cursor_size = scaled_cursor_size
+
     # Ensure output directory and resolve path
     output_path = _resolve_output_path(output_path)
 
     # Load and prepare image
     print(f"Loading image: {image_path}")
-    main_image = load_and_resize_image(image_path, WIDTH, HEIGHT, cleanup_manager)
+    main_image = load_and_resize_image(image_path, width, height, cleanup_manager)
 
     print(f"Generating diagonal zig-zag animation...")
     print(f"Reveal duration: {reveal_duration}s, Total duration: {total_duration}s")
@@ -115,7 +141,7 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
     print(f"Creating video: {output_path}")
 
     # Write frames to video
-    write_frames_to_video(frames, output_path)
+    write_frames_to_video(frames, output_path, width, height)
     print(f"✓ Video created successfully: {output_path}")
 
     # Convert to H.264
@@ -138,7 +164,8 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
 
 
 def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_cursor_size,
-                             cleanup_manager=None, audio_path=None, audio_volume=1.0, upload_to_aws=False):
+                             cleanup_manager=None, audio_path=None, audio_volume=1.0, upload_to_aws=False,
+                             aspect_ratio=None, quality=None):
     """Create a video with multiple image reveals stitched together
 
     Args:
@@ -154,21 +181,39 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
         audio_path: Optional path to background music file (mp3, wav, etc.)
         audio_volume: Audio volume level (0.0 to 1.0, default 1.0)
         upload_to_aws: Whether to upload to AWS S3 (default False)
+        aspect_ratio: Aspect ratio (e.g., '16:9', '9:16', default None uses config default)
+        quality: Quality preset (e.g., '720p', '1080p', default None uses config default)
 
     Returns:
         tuple: (Path to video file, S3 URL if uploaded else None)
     """
+    # Calculate dimensions (handles None values with defaults)
+    width, height = calculate_dimensions(aspect_ratio, quality)
+    if aspect_ratio or quality:
+        print(f"Using dimensions: {width}x{height} ({aspect_ratio or 'default ratio'}, {quality or 'default quality'})")
+
+    # Scale cursor size based on dimensions
+    scaled_cursor_size = calculate_cursor_size(width, height)
+    if scaled_cursor_size != pencil_cursor_size:
+        print(f"Scaling cursor from {pencil_cursor_size}px to {scaled_cursor_size}px for {width}x{height}")
+        # Re-scale the cursor if it was already loaded
+        if pencil_cursor.shape[0] != scaled_cursor_size:
+            pencil_cursor = cv2.resize(pencil_cursor, (scaled_cursor_size, scaled_cursor_size),
+                                      interpolation=cv2.INTER_LANCZOS4)
+        pencil_cursor_size = scaled_cursor_size
+
     # Ensure output directory and resolve path
     output_path = _resolve_output_path(output_path)
 
     all_frames = []
 
     for idx, config in enumerate(image_configs):
-        image_path = config.get('image')
+        # Support both 'image' and 'url' keys
+        image_path = config.get('image') or config.get('url')
         seconds = config.get('seconds', DEFAULT_TOTAL_DURATION)
 
         if not image_path:
-            raise ValueError(f"Missing 'image' key in config at index {idx}")
+            raise ValueError(f"Missing 'image' or 'url' key in config at index {idx}")
 
         # Calculate reveal duration (half of total duration by default)
         reveal_duration = seconds * 0.5
@@ -178,7 +223,7 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
         print(f"  Duration: {seconds}s (reveal: {reveal_duration}s)")
 
         # Load image
-        main_image = load_and_resize_image(image_path, WIDTH, HEIGHT, cleanup_manager)
+        main_image = load_and_resize_image(image_path, width, height, cleanup_manager)
 
         # Generate frames for this image
         frames = create_single_reveal_animation(main_image, pencil_cursor, pencil_cursor_size,
@@ -190,7 +235,7 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
     print(f"\nWriting final video: {output_path}")
     print(f"Total frames: {len(all_frames)}, Duration: {len(all_frames)/FPS:.1f}s")
 
-    write_frames_to_video(all_frames, output_path)
+    write_frames_to_video(all_frames, output_path, width, height)
     print(f"✓ Video created successfully: {output_path}")
 
     # Convert to H.264
