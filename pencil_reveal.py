@@ -9,7 +9,6 @@ Supports both single image and multi-image array modes with automatic cleanup
 
 import sys
 import json
-import uuid
 from pathlib import Path
 from src.config import PENCIL_SIZE, TEMP_DIR, calculate_dimensions, ASPECT_RATIOS, QUALITY_PRESETS
 from src.cursor_utils import load_pencil_cursor, create_simple_pencil_cursor
@@ -172,7 +171,8 @@ def _handle_single_image_mode():
 
     # Generate UUID filename if not provided
     if output_video is None:
-        output_video = f"{uuid.uuid4()}.mp4"
+        from src.filename_utils import generate_timestamped_filename
+        output_video = generate_timestamped_filename()
         print(f"Generated filename: {output_video}")
 
     # Load or create pencil cursor
@@ -334,7 +334,8 @@ def _handle_multi_image_mode():
 
     # Generate UUID filename if not provided
     if output_video is None:
-        output_video = f"{uuid.uuid4()}.mp4"
+        from src.filename_utils import generate_timestamped_filename
+        output_video = generate_timestamped_filename()
         print(f"Generated filename: {output_video}")
 
     # Load or create pencil cursor
