@@ -65,6 +65,20 @@ def create_single_reveal_animation(main_image, pencil_cursor, pencil_cursor_size
     return frames
 
 
+def create_static_hold_frames(image, duration_seconds):
+    """Create static frames showing image for specified duration
+
+    Args:
+        image: Image to display (numpy.ndarray)
+        duration_seconds: How long to show image in seconds
+
+    Returns:
+        list: List of frames (copies of the same image)
+    """
+    num_frames = int(duration_seconds * FPS)
+    return [image.copy() for _ in range(num_frames)]
+
+
 def _calculate_cursor_alpha(frame_idx, total_frames):
     """Calculate cursor alpha multiplier for fade in/out effect
 

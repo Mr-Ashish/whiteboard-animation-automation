@@ -83,6 +83,7 @@ def _handle_single_image_mode():
     upload_to_aws = False
     aspect_ratio = None
     quality = None
+    image_type = 'scene'  # Default to scene
 
     i = 1
     while i < len(args):
@@ -91,6 +92,17 @@ def _handle_single_image_mode():
         if arg == '--upload':
             upload_to_aws = True
             i += 1
+
+        elif arg == '--type':
+            if i + 1 < len(args):
+                image_type = args[i + 1]
+                if image_type not in ['scene', 'cover']:
+                    print(f"Error: Invalid type '{image_type}'. Must be 'scene' or 'cover'")
+                    sys.exit(1)
+                i += 2
+            else:
+                print("Error: --type requires a value")
+                sys.exit(1)
 
         elif arg == '--ratio':
             if i + 1 < len(args):
@@ -184,22 +196,39 @@ def _handle_single_image_mode():
         if audio_path:
             audio_path = resolve_audio_path(audio_path, cleanup)
 
-        video_path, s3_url = create_reveal_video(
-            input_image_arg, output_video, pencil_cursor, cursor_size,
-            cleanup_manager=cleanup,
-            audio_path=audio_path,
-            audio_volume=audio_volume,
-            upload_to_aws=upload_to_aws,
-            aspect_ratio=aspect_ratio,
-            quality=quality
-        )
+        # Handle based on image type
+        if image_type == 'cover':
+            # Create static 1-second video for cover image
+            from src.video_writer import create_static_cover_video
+            video_path, s3_url = create_static_cover_video(
+                input_image_arg, output_video,
+                cleanup_manager=cleanup,
+                audio_path=audio_path,
+                audio_volume=audio_volume,
+                upload_to_aws=upload_to_aws,
+                aspect_ratio=aspect_ratio,
+                quality=quality,
+                duration_seconds=1.0
+            )
+
+        else:
+            # Normal reveal animation for scene type
+            video_path, s3_url = create_reveal_video(
+                input_image_arg, output_video, pencil_cursor, cursor_size,
+                cleanup_manager=cleanup,
+                audio_path=audio_path,
+                audio_volume=audio_volume,
+                upload_to_aws=upload_to_aws,
+                aspect_ratio=aspect_ratio,
+                quality=quality
+            )
 
     print("\n✓ Cleanup complete - all temporary files removed")
 
     # Display results
     if s3_url:
         print(f"\n{'='*60}")
-        print(f"S3 URL: {s3_url}")
+        print(f"S3 URL: <s3url>{s3_url}</s3url>")
         print(f"{'='*60}")
     else:
         print(f"\n✓ Success! Video saved locally: {video_path}")
@@ -229,7 +258,7 @@ def _handle_multi_image_mode():
         print("Error: Config JSON must be an array of objects")
         sys.exit(1)
 
-    # Validate image paths and URLs
+    # Validate image paths, URLs, and types
     for idx, config in enumerate(image_configs):
         if 'image' not in config:
             print(f"Error: Missing 'image' key in config at index {idx}")
@@ -242,6 +271,12 @@ def _handle_multi_image_mode():
             if not image_path.exists():
                 print(f"Error: Image not found: {image_arg}")
                 sys.exit(1)
+
+        # Validate image type if specified
+        image_type = config.get('type', 'scene')
+        if image_type not in ['scene', 'cover']:
+            print(f"Error: Invalid type '{image_type}' at index {idx}. Must be 'scene' or 'cover'")
+            sys.exit(1)
 
     # Parse optional arguments
     args = sys.argv[3:]
@@ -362,7 +397,7 @@ def _handle_multi_image_mode():
     # Display results
     if s3_url:
         print(f"\n{'='*60}")
-        print(f"S3 URL: {s3_url}")
+        print(f"S3 URL: <s3url>{s3_url}</s3url>")
         print(f"{'='*60}")
     else:
         print(f"\n✓ Success! Video saved locally: {video_path}")

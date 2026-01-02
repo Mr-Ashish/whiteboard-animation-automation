@@ -9,7 +9,7 @@ from .config import (
     calculate_dimensions, calculate_cursor_size
 )
 from .image_utils import load_and_resize_image
-from .animation import create_single_reveal_animation
+from .animation import create_single_reveal_animation, create_static_hold_frames
 from .cleanup_utils import ensure_output_dir
 from .audio_utils import loop_audio_to_video_length
 from .aws_utils import upload_to_s3
@@ -163,17 +163,77 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
     return output_path, s3_url
 
 
+def create_static_cover_video(image_path, output_path, cleanup_manager=None,
+                              audio_path=None, audio_volume=1.0, upload_to_aws=False,
+                              aspect_ratio=None, quality=None, duration_seconds=1.0):
+    """Create a static cover video showing an image for a specified duration
+
+    Args:
+        image_path: Path to the image file or URL
+        output_path: Path to output video file
+        cleanup_manager: Optional CleanupManager for temp file cleanup
+        audio_path: Optional path to background music file (mp3, wav, etc.)
+        audio_volume: Audio volume level (0.0 to 1.0, default 1.0)
+        upload_to_aws: Whether to upload to AWS S3 (default False)
+        aspect_ratio: Aspect ratio (e.g., '16:9', '9:16', default None uses config default)
+        quality: Quality preset (e.g., '720p', '1080p', default None uses config default)
+        duration_seconds: Duration to show the image in seconds (default 1.0)
+
+    Returns:
+        tuple: (Path to video file, S3 URL if uploaded else None)
+    """
+    # Calculate dimensions (handles None values with defaults)
+    width, height = calculate_dimensions(aspect_ratio, quality)
+    if aspect_ratio or quality:
+        print(f"Using dimensions: {width}x{height} ({aspect_ratio or 'default ratio'}, {quality or 'default quality'})")
+
+    # Ensure output directory and resolve path
+    output_path = _resolve_output_path(output_path)
+
+    # Load and prepare image
+    print(f"Loading cover image: {image_path}")
+    main_image = load_and_resize_image(image_path, width, height, cleanup_manager)
+
+    # Create static frames
+    print(f"Creating static cover video ({duration_seconds} second)")
+    frames = create_static_hold_frames(main_image, duration_seconds=duration_seconds)
+
+    # Write frames to video
+    write_frames_to_video(frames, output_path, width, height)
+    print(f"✓ Video created successfully: {output_path}")
+
+    # Convert to H.264
+    convert_to_h264(Path(output_path))
+
+    # Add background music if provided
+    if audio_path:
+        output_path = _add_audio_to_video(output_path, audio_path, audio_volume, cleanup_manager)
+
+    # Upload to S3 if requested
+    s3_url = None
+    if upload_to_aws:
+        try:
+            s3_url = upload_to_s3(output_path)
+        except Exception as e:
+            print(f"Warning: S3 upload failed: {e}")
+            print("Video saved locally only.")
+
+    return output_path, s3_url
+
+
 def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_cursor_size,
                              cleanup_manager=None, audio_path=None, audio_volume=1.0, upload_to_aws=False,
                              aspect_ratio=None, quality=None):
     """Create a video with multiple image reveals stitched together
 
     Args:
-        image_configs: List of dicts with 'image' (path/URL) and 'seconds' (duration) keys
+        image_configs: List of dicts with 'image' (path/URL), 'type' ('scene'/'cover'), and 'seconds' (duration) keys
                       Example: [
-                          {'image': 'path/to/img1.png', 'seconds': 5},
-                          {'image': 'https://example.com/img2.png', 'seconds': 3}
+                          {'image': 'path/to/img1.png', 'type': 'scene', 'seconds': 5},
+                          {'image': 'https://example.com/img2.png', 'seconds': 3},
+                          {'image': 'cover.jpg', 'type': 'cover'}
                       ]
+                      type defaults to 'scene', cover images shown for 1s at end
         output_path: Path to output video file
         pencil_cursor: Cursor image with alpha channel
         pencil_cursor_size: Size of cursor in pixels
@@ -206,30 +266,55 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
     output_path = _resolve_output_path(output_path)
 
     all_frames = []
+    cover_image = None  # Track first cover image
 
     for idx, config in enumerate(image_configs):
         # Support both 'image' and 'url' keys
         image_path = config.get('image') or config.get('url')
+        image_type = config.get('type', 'scene')  # Default to 'scene'
         seconds = config.get('seconds', DEFAULT_TOTAL_DURATION)
 
         if not image_path:
             raise ValueError(f"Missing 'image' or 'url' key in config at index {idx}")
 
-        # Calculate reveal duration (half of total duration by default)
-        reveal_duration = seconds * 0.5
-        total_duration = seconds
-
-        print(f"\n[{idx+1}/{len(image_configs)}] Processing: {image_path}")
-        print(f"  Duration: {seconds}s (reveal: {reveal_duration}s)")
+        # Validate image type
+        if image_type not in ['scene', 'cover']:
+            raise ValueError(f"Invalid type '{image_type}' at index {idx}. Must be 'scene' or 'cover'")
 
         # Load image
         main_image = load_and_resize_image(image_path, width, height, cleanup_manager)
 
-        # Generate frames for this image
-        frames = create_single_reveal_animation(main_image, pencil_cursor, pencil_cursor_size,
-                                               reveal_duration, total_duration, ZIG_ZAG_AMPLITUDE)
-        all_frames.extend(frames)
-        print(f"  Generated {len(frames)} frames")
+        # Handle based on type
+        if image_type == 'cover':
+            # Save first cover, skip animation
+            if cover_image is None:
+                cover_image = main_image
+                print(f"\n[{idx+1}/{len(image_configs)}] Cover image: {image_path}")
+            else:
+                print(f"\n[{idx+1}/{len(image_configs)}] Skipping duplicate cover: {image_path}")
+            continue
+
+        elif image_type == 'scene':
+            # Normal reveal animation
+            # Calculate reveal duration (half of total duration by default)
+            reveal_duration = seconds * 0.5
+            total_duration = seconds
+
+            print(f"\n[{idx+1}/{len(image_configs)}] Processing scene: {image_path}")
+            print(f"  Duration: {seconds}s (reveal: {reveal_duration}s)")
+
+            # Generate frames for this image
+            frames = create_single_reveal_animation(main_image, pencil_cursor, pencil_cursor_size,
+                                                   reveal_duration, total_duration, ZIG_ZAG_AMPLITUDE)
+            all_frames.extend(frames)
+            print(f"  Generated {len(frames)} frames")
+
+    # Append cover image at the end if found
+    if cover_image is not None:
+        print(f"\nAdding cover image buffer (1 second)")
+        cover_frames = create_static_hold_frames(cover_image, duration_seconds=1.0)
+        all_frames.extend(cover_frames)
+        print(f"  Generated {len(cover_frames)} cover frames")
 
     # Write all frames to video
     print(f"\nWriting final video: {output_path}")
