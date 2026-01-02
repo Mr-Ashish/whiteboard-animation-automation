@@ -11,7 +11,7 @@ from .config import (
 from .image_utils import load_and_resize_image
 from .animation import create_single_reveal_animation, create_static_hold_frames
 from .cleanup_utils import ensure_output_dir
-from .audio_utils import loop_audio_to_video_length
+from .audio_utils import match_video_to_audio_length
 from .aws_utils import upload_to_s3
 
 
@@ -389,7 +389,8 @@ def _add_audio_to_video(video_path, audio_path, volume, cleanup_manager):
 
     try:
         # Add audio to create final video with original name
-        final_video = loop_audio_to_video_length(
+        # This will extend video if audio is longer
+        final_video = match_video_to_audio_length(
             temp_video,
             audio_path,
             output_path=video_path,
