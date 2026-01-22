@@ -10,6 +10,7 @@ from .config import (
 )
 from .image_utils import load_and_resize_image
 from .animation import create_single_reveal_animation, create_static_hold_frames
+from .pan_zoom_animation import create_pan_zoom_animation
 from .cleanup_utils import ensure_output_dir
 from .audio_utils import match_video_to_audio_length
 from .aws_utils import upload_to_s3
@@ -315,6 +316,104 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
         cover_frames = create_static_hold_frames(cover_image, duration_seconds=1.0)
         all_frames.extend(cover_frames)
         print(f"  Generated {len(cover_frames)} cover frames")
+
+    # Write all frames to video
+    print(f"\nWriting final video: {output_path}")
+    print(f"Total frames: {len(all_frames)}, Duration: {len(all_frames)/FPS:.1f}s")
+
+    write_frames_to_video(all_frames, output_path, width, height)
+    print(f"✓ Video created successfully: {output_path}")
+
+    # Convert to H.264
+    convert_to_h264(Path(output_path))
+
+    # Add background music if provided
+    if audio_path:
+        output_path = _add_audio_to_video(output_path, audio_path, audio_volume, cleanup_manager)
+
+    # Upload to S3 if requested
+    s3_url = None
+    if upload_to_aws:
+        try:
+            s3_url = upload_to_s3(output_path)
+        except Exception as e:
+            print(f"Warning: S3 upload failed: {e}")
+            print("Video saved locally only.")
+
+    return output_path, s3_url
+
+
+def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
+                          audio_path=None, audio_volume=1.0, upload_to_aws=False,
+                          aspect_ratio=None, quality=None, zoom_level=None,
+                          pan_distance_ratio=None):
+    """Create a video with pan-zoom animation for multiple images
+
+    Images are zoomed in and pan vertically with alternating directions (up/down).
+
+    Args:
+        image_configs: List of dicts with 'image' (path/URL) and 'seconds' (duration) keys
+                      Example: [
+                          {'image': 'path/to/img1.png', 'seconds': 5},
+                          {'image': 'https://example.com/img2.png', 'seconds': 4}
+                      ]
+        output_path: Path to output video file
+        cleanup_manager: Optional CleanupManager for temp file cleanup
+        audio_path: Optional path to background music file (mp3, wav, etc.)
+        audio_volume: Audio volume level (0.0 to 1.0, default 1.0)
+        upload_to_aws: Whether to upload to AWS S3 (default False)
+        aspect_ratio: Aspect ratio (e.g., '16:9', '9:16', default None uses config default)
+        quality: Quality preset (e.g., '720p', '1080p', default None uses config default)
+        zoom_level: Zoom factor (1.0 = no zoom, 1.1 = 10% zoom in, default uses config)
+        pan_distance_ratio: Pan distance as ratio of image height (0.0-1.0, default uses config)
+
+    Returns:
+        tuple: (Path to video file, S3 URL if uploaded else None)
+    """
+    from .config import DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO
+    
+    # Use defaults if not provided
+    if zoom_level is None:
+        zoom_level = DEFAULT_ZOOM_LEVEL
+    if pan_distance_ratio is None:
+        pan_distance_ratio = DEFAULT_PAN_DISTANCE_RATIO
+
+    # Calculate dimensions (handles None values with defaults)
+    width, height = calculate_dimensions(aspect_ratio, quality)
+    if aspect_ratio or quality:
+        print(f"Using dimensions: {width}x{height} ({aspect_ratio or 'default ratio'}, {quality or 'default quality'})")
+
+    print(f"Pan-zoom settings: zoom={zoom_level}x, pan={pan_distance_ratio*100:.0f}% of height")
+
+    # Ensure output directory and resolve path
+    output_path = _resolve_output_path(output_path)
+
+    all_frames = []
+
+    for idx, config in enumerate(image_configs):
+        # Support both 'image' and 'url' keys
+        image_path = config.get('image') or config.get('url')
+        seconds = config.get('seconds', 5.0)
+
+        if not image_path:
+            raise ValueError(f"Missing 'image' or 'url' key in config at index {idx}")
+
+        # Alternate direction: even indices = up, odd indices = down
+        direction = "up" if idx % 2 == 0 else "down"
+
+        # Load image
+        print(f"\n[{idx+1}/{len(image_configs)}] Loading: {image_path}")
+        main_image = load_and_resize_image(image_path, width, height, cleanup_manager)
+
+        print(f"  Direction: {direction}, Duration: {seconds}s")
+
+        # Generate pan-zoom frames for this image
+        frames = create_pan_zoom_animation(
+            main_image, width, height, seconds, direction,
+            zoom_level=zoom_level, pan_distance_ratio=pan_distance_ratio
+        )
+        all_frames.extend(frames)
+        print(f"  Generated {len(frames)} frames")
 
     # Write all frames to video
     print(f"\nWriting final video: {output_path}")
