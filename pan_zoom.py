@@ -185,7 +185,7 @@ def main():
     # Display results
     if s3_url:
         print(f"\n{'='*60}")
-        print(f"S3 URL: {s3_url}")
+        print(f"S3 URL: <s3url>{s3_url}</s3url>")
         print(f"{'='*60}")
     else:
         print(f"\n✓ Success! Video saved locally: {video_path}")
