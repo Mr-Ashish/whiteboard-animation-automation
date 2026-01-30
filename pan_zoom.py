@@ -23,6 +23,7 @@ def main():
         print("    --audio <file>     Add background music (mp3, wav, etc.)")
         print("    --volume <0.0-1.0> Set audio volume (default: 1.0)")
         print("    --upload           Upload video to AWS S3 (requires .env config)")
+        print("    --captions <file>  Add timed captions from JSON (word/letter timing)")
         print("    --ratio <ratio>    Aspect ratio (default: 9:16)")
         print(f"                       Available: {', '.join(ASPECT_RATIOS.keys())}")
         print("    --quality <qual>   Video quality (default: 720p)")
@@ -39,6 +40,9 @@ def main():
         print('      {"image": "path/to/image1.png", "seconds": 5},')
         print('      {"image": "https://example.com/image2.png", "seconds": 4}')
         print('    ]')
+        print()
+        print("  Captions JSON format (for --captions):")
+        print('    [{"text": "word", "start": 0.0, "end": 0.5}, ...]')
         print()
         print("  Note: Both local file paths and image URLs are supported")
         print("  Output videos are saved to output/ directory")
@@ -85,12 +89,24 @@ def main():
     upload_to_aws = False
     aspect_ratio = None
     quality = None
+    captions_path = None
 
     i = 0
     while i < len(args):
         arg = args[i]
 
-        if arg == '--upload':
+        if arg == '--captions':
+            if i + 1 < len(args):
+                captions_path = Path(args[i + 1])
+                if not captions_path.exists():
+                    print(f"Error: Captions file not found: {captions_path}")
+                    sys.exit(1)
+                i += 2
+            else:
+                print("Error: --captions requires a JSON file path")
+                sys.exit(1)
+
+        elif arg == '--upload':
             upload_to_aws = True
             i += 1
 
@@ -164,6 +180,13 @@ def main():
         output_video = generate_timestamped_filename()
         print(f"Generated filename: {output_video}")
 
+    # Load captions if requested
+    captions = None
+    if captions_path:
+        from src.caption_overlay import load_captions_from_json
+        captions = load_captions_from_json(str(captions_path))
+        print(f"Loaded {len(captions)} caption segments from {captions_path}")
+
     # Generate video with cleanup
     with CleanupManager(TEMP_DIR) as cleanup:
         # Resolve audio path/URL if provided
@@ -177,7 +200,8 @@ def main():
             audio_volume=audio_volume,
             upload_to_aws=upload_to_aws,
             aspect_ratio=aspect_ratio,
-            quality=quality
+            quality=quality,
+            captions=captions,
         )
 
     print("\n✓ Cleanup complete - all temporary files removed")

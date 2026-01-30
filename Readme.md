@@ -52,6 +52,9 @@ For a quick one-command execution, use the provided shell script with JSON input
 
 # With custom aspect ratio and quality
 ./run.sh '{"images":[{"url":"https://example.com/image1.jpg","seconds":5}],"audio":"https://example.com/music.mp3","ratio":"16:9","quality":"1080p"}'
+
+# With captions (ElevenLabs timing-only payload: text + alignment)
+./run.sh '{"images":[...],"audio":"...","captions":{"text":"Hello world","alignment":{"characters":["H","e","l","l","o",...],"character_start_times_seconds":[0,0.05,...],"character_end_times_seconds":[0.05,0.1,...]}}}'
 ```
 
 The script will:
@@ -60,6 +63,13 @@ The script will:
 - Generate video from provided JSON
 - Upload to S3 (requires `.env` configuration)
 - Clean up temporary files
+
+**Test run (pencil reveal with images, audio, and captions):**
+```bash
+./run_test.sh           # pencil reveal using test_payload.json
+./run_test.sh pan_zoom  # pan-zoom using same payload
+```
+Uses [test_payload.json](test_payload.json) (images/audio from [images_config.json](images_config.json), sample ElevenLabs-style captions). Output in `output/`.
 
 ### AWS S3 Upload Setup (Optional)
 
@@ -144,11 +154,23 @@ Each object requires:
 - **URL Support**: Download images directly from URLs
 - **Background Music**: Add looping background music to videos (mp3, wav, etc.)
 - **AWS S3 Upload**: Automatically upload videos to S3 and get public URLs
+- **Optional Captions**: Add timed word/letter captions from a JSON file (`--captions`); white text with black outline, with optional emphasized current word
 - **Performance Optimized**: 30 FPS default, vectorized operations for faster generation
 - **Auto Cleanup**: Temporary files are automatically removed after video generation
 - **Organized Output**: All videos saved to `output/` directory
 - **Modular Structure**: Clean separation of concerns in `src/` folder
 - **Mix Sources**: Combine local files and URLs in multi-image mode
+
+### Optional captions
+
+To overlay timed captions (e.g. podcast-style word highlights), pass a JSON file with `--captions`:
+
+```bash
+python pencil_reveal.py image.png --captions captions.json output.mp4
+python pan_zoom.py config.json --captions captions.json output.mp4
+```
+
+**Captions JSON format:** (auto-detected) Either an array of `{ "text": "word", "start": 0.0, "end": 0.5 }`, or ElevenLabs timing-only payload `{ "text": "...", "alignment": { "characters", "character_start_times_seconds", "character_end_times_seconds" } }`. No extra dependencies: uses Pillow (already in `requirements.txt`).
 
 ## Configuration
 

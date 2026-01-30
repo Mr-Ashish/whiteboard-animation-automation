@@ -14,6 +14,7 @@ from .pan_zoom_animation import create_pan_zoom_animation
 from .cleanup_utils import ensure_output_dir
 from .audio_utils import match_video_to_audio_length
 from .aws_utils import upload_to_s3
+from .caption_overlay import overlay_captions_on_frames
 
 
 def write_frames_to_video(frames, output_path, width=None, height=None, show_progress=True):
@@ -85,7 +86,7 @@ def convert_to_h264(video_path):
 def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_size,
                        reveal_duration=None, total_duration=None, cleanup_manager=None,
                        audio_path=None, audio_volume=1.0, upload_to_aws=False,
-                       aspect_ratio=None, quality=None):
+                       aspect_ratio=None, quality=None, captions=None, caption_options=None):
     """Create the diagonal zig-zag reveal animation video for a single image
 
     Args:
@@ -101,6 +102,8 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
         upload_to_aws: Whether to upload to AWS S3 (default False)
         aspect_ratio: Aspect ratio (e.g., '16:9', '9:16', default None uses config default)
         quality: Quality preset (e.g., '720p', '1080p', default None uses config default)
+        captions: Optional list of (text, start_sec, end_sec) for overlay; None = no captions
+        caption_options: Optional dict to override caption style (see caption_overlay.DEFAULT_CAPTION_OPTIONS)
 
     Returns:
         tuple: (Path to video file, S3 URL if uploaded else None)
@@ -139,6 +142,10 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
     frames = create_single_reveal_animation(main_image, pencil_cursor, pencil_cursor_size,
                                            reveal_duration, total_duration, ZIG_ZAG_AMPLITUDE)
 
+    # Optional: overlay captions (word/letter timing)
+    if captions:
+        overlay_captions_on_frames(frames, captions, FPS, width, height, caption_options or {})
+
     print(f"Creating video: {output_path}")
 
     # Write frames to video
@@ -166,7 +173,8 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
 
 def create_static_cover_video(image_path, output_path, cleanup_manager=None,
                               audio_path=None, audio_volume=1.0, upload_to_aws=False,
-                              aspect_ratio=None, quality=None, duration_seconds=1.0):
+                              aspect_ratio=None, quality=None, duration_seconds=1.0,
+                              captions=None, caption_options=None):
     """Create a static cover video showing an image for a specified duration
 
     Args:
@@ -199,6 +207,10 @@ def create_static_cover_video(image_path, output_path, cleanup_manager=None,
     print(f"Creating static cover video ({duration_seconds} second)")
     frames = create_static_hold_frames(main_image, duration_seconds=duration_seconds)
 
+    # Optional: overlay captions
+    if captions:
+        overlay_captions_on_frames(frames, captions, FPS, width, height, caption_options or {})
+
     # Write frames to video
     write_frames_to_video(frames, output_path, width, height)
     print(f"✓ Video created successfully: {output_path}")
@@ -224,7 +236,7 @@ def create_static_cover_video(image_path, output_path, cleanup_manager=None,
 
 def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_cursor_size,
                              cleanup_manager=None, audio_path=None, audio_volume=1.0, upload_to_aws=False,
-                             aspect_ratio=None, quality=None):
+                             aspect_ratio=None, quality=None, captions=None, caption_options=None):
     """Create a video with multiple image reveals stitched together
 
     Args:
@@ -317,6 +329,10 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
         all_frames.extend(cover_frames)
         print(f"  Generated {len(cover_frames)} cover frames")
 
+    # Optional: overlay captions
+    if captions:
+        overlay_captions_on_frames(all_frames, captions, FPS, width, height, caption_options or {})
+
     # Write all frames to video
     print(f"\nWriting final video: {output_path}")
     print(f"Total frames: {len(all_frames)}, Duration: {len(all_frames)/FPS:.1f}s")
@@ -346,7 +362,7 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
 def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
                           audio_path=None, audio_volume=1.0, upload_to_aws=False,
                           aspect_ratio=None, quality=None, zoom_level=None,
-                          pan_distance_ratio=None):
+                          pan_distance_ratio=None, captions=None, caption_options=None):
     """Create a video with pan-zoom animation for multiple images
 
     Images are zoomed in and pan vertically with alternating directions (up/down).
@@ -414,6 +430,10 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
         )
         all_frames.extend(frames)
         print(f"  Generated {len(frames)} frames")
+
+    # Optional: overlay captions
+    if captions:
+        overlay_captions_on_frames(all_frames, captions, FPS, width, height, caption_options or {})
 
     # Write all frames to video
     print(f"\nWriting final video: {output_path}")
