@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # Pencil Reveal Video Generator Script
-# Usage: ./run.sh '{"images":[{"url":"...","seconds":5}],"audio":"https://...","ratio":"16:9","quality":"720p","captions":{...}}'
-# Optional "captions": ElevenLabs timing-only payload with "text" and "alignment" (characters, character_start_times_seconds, character_end_times_seconds)
+# Usage: ./run.sh <payload.json>
+# Example: ./run.sh test_payload.json
+# Payload file (in project root) must contain: images, optional audio, ratio, quality, captions.
 
 set -e
 
@@ -13,17 +14,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 # Remove any legacy temp files from previous runs (project root)
 rm -f temp_config_*.json temp_captions_*.json 2>/dev/null || true
 
-# Check if JSON input is provided
+# First argument is payload JSON filename (in project root)
 if [ -z "$1" ]; then
-    echo "Error: Please provide JSON input"
-    echo "Usage: ./run.sh '{\"images\":[{\"url\":\"...\",\"seconds\":5}],\"audio\":\"https://...\",\"ratio\":\"16:9\",\"quality\":\"720p\"}'"
+    echo "Error: Please provide payload file path"
+    echo "Usage: ./run.sh <payload.json>"
+    echo "Example: ./run.sh test_payload.json"
     exit 1
 fi
 
-JSON_INPUT="$1"
+PAYLOAD_FILE="$1"
+[ "${PAYLOAD_FILE#/}" = "$PAYLOAD_FILE" ] && PAYLOAD_FILE="${SCRIPT_DIR}/${PAYLOAD_FILE}"
+if [ ! -f "$PAYLOAD_FILE" ]; then
+    echo "Error: Payload file not found: $1"
+    exit 1
+fi
+
+JSON_INPUT=$(cat "$PAYLOAD_FILE")
 TEMP_DIR="temp/run_$$"
 mkdir -p "$TEMP_DIR"
 TEMP_CONFIG="$TEMP_DIR/config.json"

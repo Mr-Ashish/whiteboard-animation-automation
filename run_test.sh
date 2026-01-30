@@ -1,27 +1,29 @@
 #!/bin/bash
-# Run a test video using test_payload.json (pencil reveal with images, audio, captions).
+# Run a test video using a payload JSON file (default: test_payload.json).
 # Usage: ./run_test.sh
-#        ./run_test.sh pan_zoom   # use pan-zoom instead of pencil reveal
+#        ./run_test.sh pan_zoom
+#        ./run_test.sh sample.json
+#        ./run_test.sh sample.json pan_zoom
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-PAYLOAD_FILE="${SCRIPT_DIR}/test_payload.json"
-if [ ! -f "$PAYLOAD_FILE" ]; then
-    echo "Error: test_payload.json not found at $PAYLOAD_FILE"
-    exit 1
+PAYLOAD_FILE="test_payload.json"
+MODE="run"
+if [ "$1" = "pan_zoom" ]; then
+    MODE="pan_zoom"
+elif [ -n "$1" ]; then
+    PAYLOAD_FILE="$1"
+    [ "$2" = "pan_zoom" ] && MODE="pan_zoom"
 fi
 
-# Read payload (single line for safe passing)
-JSON_INPUT=$(cat "$PAYLOAD_FILE")
-
-if [ "$1" = "pan_zoom" ]; then
-    echo "Running pan-zoom test..."
-    ./run_pan_zoom.sh "$JSON_INPUT"
+if [ "$MODE" = "pan_zoom" ]; then
+    echo "Running pan-zoom test with $PAYLOAD_FILE..."
+    ./run_pan_zoom.sh "$PAYLOAD_FILE"
 else
-    echo "Running pencil reveal test..."
-    ./run.sh "$JSON_INPUT"
+    echo "Running pencil reveal test with $PAYLOAD_FILE..."
+    ./run.sh "$PAYLOAD_FILE"
 fi
 
 echo "Test complete. Check output/ for the generated video."
