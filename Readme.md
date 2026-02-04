@@ -6,7 +6,10 @@ Create diagonal zig-zag pencil drawing reveal animations for images. Supports bo
 
 ```
 python-video/
-├── src/                    # Source modules
+├── src/                    # Source modules (package structure)
+│   ├── cli/               # Main CLI entry points (differentiated from modules)
+│   │   ├── pan_zoom.py    # Pan-zoom animation CLI
+│   │   └── pencil_reveal.py  # Pencil reveal CLI (single + multi modes)
 │   ├── config.py          # Configuration constants
 │   ├── cursor_utils.py    # Cursor/pencil creation
 │   ├── download_utils.py  # URL download handling
@@ -14,13 +17,17 @@ python-video/
 │   ├── path_generator.py  # Zig-zag path generation
 │   ├── animation.py       # Reveal animation logic
 │   ├── video_writer.py    # Video creation/stitching
-│   └── cleanup_utils.py   # Temporary file cleanup
-├── assets/                # Sample images and cursors
+│   ├── utils/             # Common utilities (error handling, CLI parsing, config)
+│   │   ├── error_handler.py
+│   │   ├── cli_utils.py
+│   │   └── config_utils.py
+│   ├── cleanup_utils.py   # Temporary file cleanup
+│   └── ... (other modules)
+├── src/assets/                # Sample images and cursors
 │   ├── hand_pencil.png    # Custom pencil cursor
 │   └── image_3.png        # Sample image
 ├── output/                # Generated videos (auto-created)
 ├── temp/                  # Temporary files (auto-cleaned)
-├── pencil_reveal.py       # Main entry point
 └── requirements.txt       # Dependencies
 ```
 
@@ -98,13 +105,13 @@ Create a reveal animation for a single image (local file or URL):
 
 ```bash
 # Using local file with default pencil cursor
-python pencil_reveal.py image.png output.mp4
+python -m src.cli.pencil_reveal image.png output.mp4
 
 # Using image URL with default pencil cursor
-python pencil_reveal.py https://example.com/image.jpg output.mp4
+python -m src.cli.pencil_reveal https://example.com/image.jpg output.mp4
 
 # Using custom pencil cursor
-python pencil_reveal.py image.png hand_pencil.png output.mp4
+python -m src.cli.pencil_reveal image.png hand_pencil.png output.mp4
 ```
 
 **Arguments:**
@@ -120,10 +127,10 @@ Create a video with multiple image reveals stitched together:
 
 ```bash
 # Using default pencil cursor
-python pencil_reveal.py --multi config.json output.mp4
+python -m src.cli.pencil_reveal --multi config.json output.mp4
 
 # Using custom pencil cursor
-python pencil_reveal.py --multi config.json hand_pencil.png output.mp4
+python -m src.cli.pencil_reveal --multi config.json hand_pencil.png output.mp4
 ```
 
 **Config JSON Format:**
@@ -166,8 +173,8 @@ Each object requires:
 To overlay timed captions (e.g. podcast-style word highlights), pass a JSON file with `--captions`:
 
 ```bash
-python pencil_reveal.py image.png --captions captions.json output.mp4
-python pan_zoom.py config.json --captions captions.json output.mp4
+python -m src.cli.pencil_reveal image.png --captions captions.json output.mp4
+python -m src.cli.pan_zoom config.json --captions captions.json output.mp4
 ```
 
 **Captions JSON format:** (auto-detected) Either an array of `{ "text": "word", "start": 0.0, "end": 0.5 }`, or ElevenLabs timing-only payload `{ "text": "...", "alignment": { "characters", "character_start_times_seconds", "character_end_times_seconds" } }`. No extra dependencies: uses Pillow (already in `requirements.txt`).
@@ -199,32 +206,32 @@ You can override these with CLI flags (`--ratio`, `--quality`) or edit `src/conf
 
 ```bash
 # Basic single image (local file) - outputs to output/my_video.mp4
-python pencil_reveal.py assets/image_3.png my_video.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png my_video.mp4
 
 # Single image from URL - automatically downloads, generates video, cleans up
-python pencil_reveal.py https://picsum.photos/1080/1920 my_video.mp4
+python -m src.cli.pencil_reveal https://picsum.photos/1080/1920 my_video.mp4
 
 # Single image with custom cursor from assets
-python pencil_reveal.py assets/image_3.png assets/hand_pencil.png my_video.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png src/assets/hand_pencil.png my_video.mp4
 ```
 
 ### With Aspect Ratio and Quality
 
 ```bash
 # Landscape 16:9 in 1080p (e.g., YouTube)
-python pencil_reveal.py assets/image_3.png --ratio 16:9 --quality 1080p output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --ratio 16:9 --quality 1080p output.mp4
 
 # Vertical 9:16 in 720p (e.g., Instagram Stories, TikTok)
-python pencil_reveal.py assets/image_3.png --ratio 9:16 --quality 720p output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --ratio 9:16 --quality 720p output.mp4
 
 # Square 1:1 in 1080p (e.g., Instagram Post)
-python pencil_reveal.py assets/image_3.png --ratio 1:1 --quality 1080p output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --ratio 1:1 --quality 1080p output.mp4
 
 # Portrait 4:5 in 720p (e.g., Instagram Feed)
-python pencil_reveal.py --multi config.json --ratio 4:5 --quality 720p output.mp4
+python -m src.cli.pencil_reveal --multi config.json --ratio 4:5 --quality 720p output.mp4
 
 # 4K quality (2160p) - slower but highest quality
-python pencil_reveal.py assets/image_3.png --ratio 16:9 --quality 2160p output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --ratio 16:9 --quality 2160p output.mp4
 ```
 
 **Available Aspect Ratios:**
@@ -245,54 +252,54 @@ python pencil_reveal.py assets/image_3.png --ratio 16:9 --quality 2160p output.m
 
 ```bash
 # Add background music from local file
-python pencil_reveal.py assets/image_3.png --audio music.mp3 output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --audio music.mp3 output.mp4
 
 # Add background music from URL
-python pencil_reveal.py assets/image_3.png --audio https://example.com/music.mp3 output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --audio https://example.com/music.mp3 output.mp4
 
 # Add background music with custom volume (50%)
-python pencil_reveal.py assets/image_3.png --audio music.wav --volume 0.5 output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --audio music.wav --volume 0.5 output.mp4
 
 # Multi-image with background music from URL
-python pencil_reveal.py --multi config.json --audio https://example.com/background.mp3 final.mp4
+python -m src.cli.pencil_reveal --multi config.json --audio https://example.com/background.mp3 final.mp4
 
 # Full example with all options (local audio)
-python pencil_reveal.py assets/image_3.png assets/hand_pencil.png --audio music.mp3 --volume 0.7 my_video.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png src/assets/hand_pencil.png --audio music.mp3 --volume 0.7 my_video.mp4
 
 # Full example with audio URL
-python pencil_reveal.py assets/image_3.png assets/hand_pencil.png --audio https://example.com/music.mp3 --volume 0.7 my_video.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png src/assets/hand_pencil.png --audio https://example.com/music.mp3 --volume 0.7 my_video.mp4
 ```
 
 ### Multi-Image Mode
 
 ```bash
 # Multiple images stitched together (mix of local and URLs)
-python pencil_reveal.py --multi images_config.json final_video.mp4
+python -m src.cli.pencil_reveal --multi images_config.json final_video.mp4
 
 # Multiple images with custom cursor and audio
-python pencil_reveal.py --multi config.json assets/hand_pencil.png --audio music.mp3 final_video.mp4
+python -m src.cli.pencil_reveal --multi config.json src/assets/hand_pencil.png --audio music.mp3 final_video.mp4
 ```
 
 ### With AWS S3 Upload
 
 ```bash
 # Upload video to S3 (requires .env configuration)
-python pencil_reveal.py assets/image_3.png --upload my_video.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --upload my_video.mp4
 
 # Upload with background music (local file)
-python pencil_reveal.py assets/image_3.png --audio music.mp3 --upload output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --audio music.mp3 --upload output.mp4
 
 # Upload with background music from URL
-python pencil_reveal.py assets/image_3.png --audio https://example.com/music.mp3 --upload output.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png --audio https://example.com/music.mp3 --upload output.mp4
 
 # Multi-image with audio URL and S3 upload
-python pencil_reveal.py --multi config.json --audio https://example.com/music.mp3 --upload final.mp4
+python -m src.cli.pencil_reveal --multi config.json --audio https://example.com/music.mp3 --upload final.mp4
 
 # All features combined
-python pencil_reveal.py assets/image_3.png assets/hand_pencil.png --audio https://example.com/music.mp3 --volume 0.7 --ratio 16:9 --quality 1080p --upload my_video.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png src/assets/hand_pencil.png --audio https://example.com/music.mp3 --volume 0.7 --ratio 16:9 --quality 1080p --upload my_video.mp4
 
 # Multi-image with all options
-python pencil_reveal.py --multi config.json --audio https://example.com/music.mp3 --ratio 16:9 --quality 1080p --upload final.mp4
+python -m src.cli.pencil_reveal --multi config.json --audio https://example.com/music.mp3 --ratio 16:9 --quality 1080p --upload final.mp4
 ```
 
 **With `--upload` flag:**
@@ -315,7 +322,7 @@ python pencil_reveal.py --multi config.json --audio https://example.com/music.mp
 
 ```json
 [
-  {"image": "assets/image_3.png", "seconds": 5},
+  {"image": "src/assets/image_3.png", "seconds": 5},
   {"image": "https://picsum.photos/id/237/1080/1920", "seconds": 4},
   {"image": "https://picsum.photos/id/238/1080/1920", "seconds": 3}
 ]
@@ -323,7 +330,7 @@ python pencil_reveal.py --multi config.json --audio https://example.com/music.mp
 
 **Quick Test:** Try the included sample assets:
 ```bash
-python pencil_reveal.py assets/image_3.png assets/hand_pencil.png test.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png src/assets/hand_pencil.png test.mp4
 ```
 
 ## Terminal-Only Method (Using FFmpeg Directly)
@@ -332,7 +339,7 @@ If you prefer to add audio manually using terminal commands:
 
 ```bash
 # First, generate video without audio
-python pencil_reveal.py assets/image_3.png my_video.mp4
+python -m src.cli.pencil_reveal src/assets/image_3.png my_video.mp4
 
 # Then add background music using ffmpeg
 ffmpeg -i output/my_video.mp4 -stream_loop -1 -i music.mp3 \

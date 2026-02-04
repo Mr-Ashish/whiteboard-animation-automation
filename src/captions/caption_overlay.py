@@ -1,6 +1,6 @@
 """Caption overlay: draw timed text (word/letter) on video frames with Pillow.
 
-Supports TrueType (.ttf) and OpenType (.otf) fonts via font_path or assets/fonts/.
+Supports TrueType (.ttf) and OpenType (.otf) fonts via font_path or src/assets/fonts/.
 
 When captions are enabled, each frame shows a single line of text that changes over time:
 the current word/segment for that moment (based on caption start/end times). Text is
@@ -15,7 +15,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .config import PROJECT_ROOT
+# Relative import for grouped structure
+from ..config.config import PROJECT_ROOT
 
 
 # Default options for caption styling (white text, black outline).
@@ -44,8 +45,8 @@ def _get_font(path: Optional[str], size: int) -> ImageFont.FreeTypeFont:
                 return ImageFont.truetype(str(p), size)
             except OSError:
                 pass
-    # Try bundled fonts (assets/fonts/) — any .ttf or .otf
-    assets_fonts = PROJECT_ROOT / "assets" / "fonts"
+    # Try bundled fonts (src/assets/fonts/) — any .ttf or .otf
+    assets_fonts = PROJECT_ROOT / "src" / "assets" / "fonts"
     if assets_fonts.is_dir():
         for ext in ("*.ttf", "*.otf"):
             for try_path in sorted(assets_fonts.glob(ext)):

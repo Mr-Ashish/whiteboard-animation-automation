@@ -2,7 +2,8 @@
 
 import numpy as np
 import cv2
-from .config import FPS, DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO
+# Relative import for grouped structure
+from ..config.config import FPS, DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO
 
 
 def create_pan_zoom_animation(image, width, height, duration_seconds, direction="up", 

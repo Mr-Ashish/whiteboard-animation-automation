@@ -3,7 +3,8 @@
 import cv2
 import numpy as np
 from pathlib import Path
-from .download_utils import resolve_image_path
+# Relative import for grouped structure
+from ..download.download_utils import resolve_image_path
 
 
 def load_and_resize_image(image_path_or_url, target_width, target_height, cleanup_manager=None):

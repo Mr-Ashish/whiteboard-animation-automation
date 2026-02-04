@@ -3,6 +3,9 @@
 import shutil
 from pathlib import Path
 
+# Colored logging for differentiation
+from ..utils.log_utils import log_info, log_warning
+
 
 class CleanupManager:
     """Context manager for handling temporary files and cleanup"""
@@ -26,23 +29,27 @@ class CleanupManager:
         self.temp_files.append(Path(file_path))
 
     def cleanup(self):
-        """Clean up all registered temporary files and the temp directory"""
+        """Clean up all registered temporary files and the temp directory (summary only to reduce logs)."""
+        cleaned_count = 0
         # Remove registered temp files
         for temp_file in self.temp_files:
             try:
                 if temp_file.exists():
                     temp_file.unlink()
-                    print(f"Cleaned up: {temp_file}")
+                    cleaned_count += 1
             except Exception as e:
-                print(f"Warning: Could not delete {temp_file}: {e}")
+                log_warning(f"Could not delete {temp_file}: {e}")
 
         # Clean the entire temp directory
         try:
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
-                print(f"Cleaned up temp directory: {self.temp_dir}")
+                cleaned_count += 1  # Count dir as cleaned
         except Exception as e:
-            print(f"Warning: Could not delete temp directory {self.temp_dir}: {e}")
+            log_warning(f"Could not delete temp directory {self.temp_dir}: {e}")
+
+        if cleaned_count > 0:
+            log_info(f"Cleaned up {cleaned_count} temporary file(s)/dir(s)")
 
     def __enter__(self):
         """Enter context manager"""

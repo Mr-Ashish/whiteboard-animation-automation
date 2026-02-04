@@ -92,7 +92,7 @@ else:
 fi
 
 # Build command for pan-zoom script
-CMD="python pan_zoom.py $TEMP_CONFIG"
+CMD="python -m src.cli.pan_zoom $TEMP_CONFIG"
 
 if [ ! -z "$AUDIO_URL" ]; then
     CMD="$CMD --audio $AUDIO_URL"

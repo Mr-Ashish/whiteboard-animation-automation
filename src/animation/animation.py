@@ -1,7 +1,8 @@
 """Animation creation utilities for reveal effects"""
 
 import numpy as np
-from .config import (
+# Relative imports for grouped structure
+from ..config.config import (
     FPS, DIAGONAL_ANGLE,
     CURSOR_FADE_IN_FRAMES, CURSOR_FADE_OUT_FRAMES
 )

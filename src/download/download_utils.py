@@ -4,7 +4,8 @@ import requests
 import hashlib
 from pathlib import Path
 from urllib.parse import urlparse
-from .config import TEMP_DIR
+# Relative import for grouped structure
+from ..config.config import TEMP_DIR
 
 
 def is_url(path_or_url):
@@ -58,12 +59,10 @@ def download_image(url, cleanup_manager=None):
         response = requests.get(url, timeout=30, stream=True)
         response.raise_for_status()
 
-        # Write content to file
+        # Write content to file (silent download to reduce log spam; success shown in video creation)
         with open(temp_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-
-        print(f"Downloaded: {url} -> {temp_path.name}")
 
         # Register for cleanup if manager provided
         if cleanup_manager:
@@ -110,12 +109,10 @@ def download_audio(url, cleanup_manager=None):
         response = requests.get(url, timeout=30, stream=True)
         response.raise_for_status()
 
-        # Write content to file
+        # Write content to file (silent download to reduce log spam; success shown in video creation)
         with open(temp_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-
-        print(f"Downloaded audio: {url} -> {temp_path.name}")
 
         # Register for cleanup if manager provided
         if cleanup_manager:

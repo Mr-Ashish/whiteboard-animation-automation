@@ -3,18 +3,23 @@
 import cv2
 import subprocess
 from pathlib import Path
-from .config import (
+# Updated relative imports for grouped structure (e.g. from video/ to siblings like ../config/)
+from ..config.config import (
     WIDTH, HEIGHT, FPS, DEFAULT_REVEAL_DURATION,
     DEFAULT_TOTAL_DURATION, ZIG_ZAG_AMPLITUDE, OUTPUT_DIR, TEMP_DIR,
     calculate_dimensions, calculate_cursor_size
 )
-from .image_utils import load_and_resize_image
-from .animation import create_single_reveal_animation, create_static_hold_frames
-from .pan_zoom_animation import create_pan_zoom_animation
-from .cleanup_utils import ensure_output_dir
-from .audio_utils import match_video_to_audio_length
-from .aws_utils import upload_to_s3
-from .caption_overlay import overlay_captions_on_frames
+from ..image.image_utils import load_and_resize_image
+from ..animation.animation import create_single_reveal_animation, create_static_hold_frames
+from ..animation.pan_zoom_animation import create_pan_zoom_animation
+from ..cleanup.cleanup_utils import ensure_output_dir
+from ..audio.audio_utils import match_video_to_audio_length
+from ..aws.aws_utils import upload_to_s3
+from ..captions.caption_overlay import overlay_captions_on_frames
+# Common utils for error handling and config validation
+from ..utils.config_utils import validate_image_configs
+# Colored logging for differentiation
+from ..utils.log_utils import log_success, log_info, log_warning
 
 
 def write_frames_to_video(frames, output_path, width=None, height=None, show_progress=True):
@@ -74,10 +79,10 @@ def convert_to_h264(video_path):
         # Replace original with converted
         video_path.unlink()
         temp_output.rename(video_path)
-        print(f"✓ Converted to H.264: {video_path}")
+        log_success(f"✓ Converted to H.264: {video_path}")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Warning: ffmpeg not found or failed. Video saved as mp4v codec.")
+        log_warning("ffmpeg not found or failed. Video saved as mp4v codec.")
         if temp_output.exists():
             temp_output.unlink()
         return False
@@ -150,7 +155,7 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
 
     # Write frames to video
     write_frames_to_video(frames, output_path, width, height)
-    print(f"✓ Video created successfully: {output_path}")
+    log_success(f"✓ Video created successfully: {output_path}")
 
     # Convert to H.264
     convert_to_h264(Path(output_path))
@@ -165,8 +170,8 @@ def create_reveal_video(image_path, output_path, pencil_cursor, pencil_cursor_si
         try:
             s3_url = upload_to_s3(output_path)
         except Exception as e:
-            print(f"Warning: S3 upload failed: {e}")
-            print("Video saved locally only.")
+            log_warning(f"S3 upload failed: {e}")
+            log_info("Video saved locally only.")
 
     return output_path, s3_url
 
@@ -213,7 +218,7 @@ def create_static_cover_video(image_path, output_path, cleanup_manager=None,
 
     # Write frames to video
     write_frames_to_video(frames, output_path, width, height)
-    print(f"✓ Video created successfully: {output_path}")
+    log_success(f"✓ Video created successfully: {output_path}")
 
     # Convert to H.264
     convert_to_h264(Path(output_path))
@@ -228,8 +233,8 @@ def create_static_cover_video(image_path, output_path, cleanup_manager=None,
         try:
             s3_url = upload_to_s3(output_path)
         except Exception as e:
-            print(f"Warning: S3 upload failed: {e}")
-            print("Video saved locally only.")
+            log_warning(f"S3 upload failed: {e}")
+            log_info("Video saved locally only.")
 
     return output_path, s3_url
 
@@ -260,6 +265,10 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
     Returns:
         tuple: (Path to video file, S3 URL if uploaded else None)
     """
+    # Validate configs using shared utils (moved common functionality to src/utils)
+    # Supports 'url' and optional 'type' for cover/scene
+    validate_image_configs(image_configs, require_image_key=False, validate_types=True)
+
     # Calculate dimensions (handles None values with defaults)
     width, height = calculate_dimensions(aspect_ratio, quality)
     if aspect_ratio or quality:
@@ -286,13 +295,6 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
         image_path = config.get('image') or config.get('url')
         image_type = config.get('type', 'scene')  # Default to 'scene'
         seconds = config.get('seconds', DEFAULT_TOTAL_DURATION)
-
-        if not image_path:
-            raise ValueError(f"Missing 'image' or 'url' key in config at index {idx}")
-
-        # Validate image type
-        if image_type not in ['scene', 'cover']:
-            raise ValueError(f"Invalid type '{image_type}' at index {idx}. Must be 'scene' or 'cover'")
 
         # Load image
         main_image = load_and_resize_image(image_path, width, height, cleanup_manager)
@@ -338,7 +340,7 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
     print(f"Total frames: {len(all_frames)}, Duration: {len(all_frames)/FPS:.1f}s")
 
     write_frames_to_video(all_frames, output_path, width, height)
-    print(f"✓ Video created successfully: {output_path}")
+    log_success(f"✓ Video created successfully: {output_path}")
 
     # Convert to H.264
     convert_to_h264(Path(output_path))
@@ -353,8 +355,8 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
         try:
             s3_url = upload_to_s3(output_path)
         except Exception as e:
-            print(f"Warning: S3 upload failed: {e}")
-            print("Video saved locally only.")
+            log_warning(f"S3 upload failed: {e}")
+            log_info("Video saved locally only.")
 
     return output_path, s3_url
 
@@ -386,13 +388,18 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
     Returns:
         tuple: (Path to video file, S3 URL if uploaded else None)
     """
-    from .config import DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO
+    # Relative import for grouped structure
+    # Relative import for grouped structure (config now in subdir)
+    from ..config.config import DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO
     
     # Use defaults if not provided
     if zoom_level is None:
         zoom_level = DEFAULT_ZOOM_LEVEL
     if pan_distance_ratio is None:
         pan_distance_ratio = DEFAULT_PAN_DISTANCE_RATIO
+
+    # Validate configs using shared utils (common functionality in src/utils)
+    validate_image_configs(image_configs, require_image_key=False)
 
     # Calculate dimensions (handles None values with defaults)
     width, height = calculate_dimensions(aspect_ratio, quality)
@@ -410,9 +417,6 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
         # Support both 'image' and 'url' keys
         image_path = config.get('image') or config.get('url')
         seconds = config.get('seconds', 5.0)
-
-        if not image_path:
-            raise ValueError(f"Missing 'image' or 'url' key in config at index {idx}")
 
         # Alternate direction: even indices = up, odd indices = down
         direction = "up" if idx % 2 == 0 else "down"
@@ -440,7 +444,7 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
     print(f"Total frames: {len(all_frames)}, Duration: {len(all_frames)/FPS:.1f}s")
 
     write_frames_to_video(all_frames, output_path, width, height)
-    print(f"✓ Video created successfully: {output_path}")
+    log_success(f"✓ Video created successfully: {output_path}")
 
     # Convert to H.264
     convert_to_h264(Path(output_path))
@@ -455,8 +459,8 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
         try:
             s3_url = upload_to_s3(output_path)
         except Exception as e:
-            print(f"Warning: S3 upload failed: {e}")
-            print("Video saved locally only.")
+            log_warning(f"S3 upload failed: {e}")
+            log_info("Video saved locally only.")
 
     return output_path, s3_url
 

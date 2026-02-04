@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-# Project root directory
-PROJECT_ROOT = Path(__file__).parent.parent
+# Project root directory (robust for subdir structure like config/config.py)
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # Folder paths
 OUTPUT_DIR = PROJECT_ROOT / "output"

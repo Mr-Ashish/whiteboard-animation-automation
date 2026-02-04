@@ -82,7 +82,7 @@ else:
 fi
 
 # Build command with default custom cursor
-CMD="python pencil_reveal.py --multi $TEMP_CONFIG assets/hand_pencil.png"
+CMD="python -m src.cli.pencil_reveal --multi $TEMP_CONFIG src/assets/hand_pencil.png"
 
 if [ ! -z "$AUDIO_URL" ]; then
     CMD="$CMD --audio $AUDIO_URL"

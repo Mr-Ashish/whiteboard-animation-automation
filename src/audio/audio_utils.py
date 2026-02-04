@@ -3,6 +3,9 @@
 import subprocess
 from pathlib import Path
 
+# Colored logging for differentiation
+from ..utils.log_utils import log_success
+
 
 def add_background_music(video_path, audio_path, output_path=None, volume=1.0):
     """Add background music to a video using ffmpeg
@@ -60,7 +63,7 @@ def add_background_music(video_path, audio_path, output_path=None, volume=1.0):
             text=True
         )
 
-        print(f"✓ Background music added: {output_path}")
+        log_success(f"✓ Background music added: {output_path}")
         return output_path
 
     except subprocess.CalledProcessError as e:
@@ -168,7 +171,7 @@ def loop_audio_to_video_length(video_path, audio_path, output_path=None, volume=
             text=True
         )
 
-        print(f"✓ Looped background music added with fadeout: {output_path}")
+        log_success(f"✓ Looped background music added with fadeout: {output_path}")
         return output_path
 
     except subprocess.CalledProcessError as e:
@@ -263,7 +266,7 @@ def match_video_to_audio_length(video_path, audio_path, output_path=None, volume
             text=True
         )
 
-        print(f"✓ Audio added successfully: {output_path}")
+        log_success(f"✓ Audio added successfully: {output_path}")
         return output_path
 
     except subprocess.CalledProcessError as e:

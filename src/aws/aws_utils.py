@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Colored logging for differentiation
+from ..utils.log_utils import log_success
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -91,7 +94,7 @@ def upload_to_s3(file_path, custom_name=None):
         # Generate public URL
         url = f"https://{bucket_name}.s3.{region}.amazonaws.com/{object_name}"
 
-        print(f"✓ Upload successful!")
+        log_success(f"✓ Upload successful!")
         print(f"  Public URL: {url}")
 
         return url
