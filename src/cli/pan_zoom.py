@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Pan and zoom video animation
-Creates videos where images are zoomed in and pan vertically with alternating directions
+Creates videos where images are zoomed in and panned (per-image 'direction' in JSON or root default via --pan-direction/DEFAULT_PAN_DIRECTION); optional root-level avatars array for green-screen overlays.
 """
 
 import argparse
+import json
 from pathlib import Path
 # Relative imports for package structure (CLI in src/cli/, modules in src/)
 from ..config.config import ASPECT_RATIOS, QUALITY_PRESETS, TEMP_DIR
@@ -20,20 +21,19 @@ from ..utils.log_utils import log_success, log_info
 def main():
     """Main entry point for the pan-zoom animation tool"""
     parser = argparse.ArgumentParser(
-        description="Pan and zoom video animation. Creates videos where images "
-                    "are zoomed in and pan vertically with alternating directions.",
+        description="Pan and zoom video animation. Zoom in + pan (up/down/left/right, alternates for multi-image).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
     python -m src.cli.pan_zoom images_config.json output.mp4
-    python -m src.cli.pan_zoom images_config.json --audio music.mp3 output.mp4
-    python -m src.cli.pan_zoom images_config.json --ratio 16:9 --quality 1080p output.mp4
+    python -m src.cli.pan_zoom images_config.json --pan-direction left output.mp4
+    python -m src.cli.pan_zoom images_config.json --audio music.mp3 --ratio 16:9 output.mp4
     python -m src.cli.pan_zoom images_config.json --upload output.mp4
 
-Config JSON format:
-    [
-      {"image": "path/to/image1.png", "seconds": 5},
-      {"image": "https://example.com/image2.png", "seconds": 4}
-    ]
+Config JSON format (per-image 'direction' optional; falls back to root/default). Root-level "avatars" array optional for green-screen overlays:
+    {
+      "images": [ ... ],
+      "avatars": [{"url": "https://...avatar.mp4", "start": 2.0, "duration": 3.0}, ...]
+    }
 
 Captions JSON format (for --captions):
     [{"text": "word", "start": 0.0, "end": 0.5}, ...]
@@ -58,6 +58,12 @@ Output videos are saved to output/ directory.
         choices=list(QUALITY_PRESETS.keys()),
         help=f"Video quality (default: 720p). Available: {', '.join(QUALITY_PRESETS.keys())}",
     )
+    parser.add_argument(
+        "--pan-direction",
+        choices=["up", "down", "left", "right"],
+        help="Root/default pan direction (default from config: up). Per-image in JSON overrides.",
+    )
+    parser.add_argument("--avatars", help="JSON file with array of avatar videos: [{'url': 'https://...', 'start': 2.0, 'duration': 3.0}, ...] (green screen overlays)")
     parsed = parser.parse_args()
 
     # Use shared config loader from utils (supports 'url' key)
@@ -69,7 +75,9 @@ Output videos are saved to output/ directory.
     upload_to_aws = parsed.upload
     aspect_ratio = parsed.ratio
     quality = parsed.quality
+    pan_direction = parsed.pan_direction
     captions_path = parsed.captions
+    avatars_path = parsed.avatars
 
     if not 0.0 <= audio_volume <= 1.0:
         handle_error("--volume must be between 0.0 and 1.0")
@@ -78,6 +86,16 @@ Output videos are saved to output/ directory.
         captions_path = Path(captions_path)
         if not captions_path.exists():
             handle_error(f"Captions file not found: {captions_path}")
+
+    avatars = None
+    if avatars_path:
+        avatars_path = Path(avatars_path)
+        if not avatars_path.exists():
+            handle_error(f"Avatars file not found: {avatars_path}")
+        # Load avatars list (array of {url, start, duration})
+        with open(avatars_path, "r") as f:
+            avatars = json.load(f)
+        log_info(f"Loaded {len(avatars)} avatar video(s) from {avatars_path}")
 
     if audio_path:
         if not is_url(audio_path):
@@ -94,10 +112,12 @@ Output videos are saved to output/ directory.
         log_info(f"Generated filename: {output_video}")
 
     captions = None
+    caption_options = {}
     if captions_path:
         # Relative import for grouped structure (captions now in subdir)
-        from ..captions.caption_overlay import load_captions_from_json
+        from ..captions.caption_overlay import load_captions_from_json, extract_highlight_options
         captions = load_captions_from_json(str(captions_path))
+        caption_options = extract_highlight_options(str(captions_path))
         log_info(f"Loaded {len(captions)} caption segments from {captions_path}")
 
     with CleanupManager(TEMP_DIR) as cleanup:
@@ -114,7 +134,10 @@ Output videos are saved to output/ directory.
             upload_to_aws=upload_to_aws,
             aspect_ratio=aspect_ratio,
             quality=quality,
+            pan_direction=pan_direction,
             captions=captions,
+            caption_options=caption_options,
+            avatars=avatars,
         )
 
     log_info("\n✓ Cleanup complete - all temporary files removed")

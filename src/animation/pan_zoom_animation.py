@@ -3,25 +3,27 @@
 import numpy as np
 import cv2
 # Relative import for grouped structure
-from ..config.config import FPS, DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO
+from ..config.config import FPS, DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO, DEFAULT_PAN_DIRECTION
 
 
-def create_pan_zoom_animation(image, width, height, duration_seconds, direction="up", 
+def create_pan_zoom_animation(image, width, height, duration_seconds, direction=None, 
                               zoom_level=None, pan_distance_ratio=None):
-    """Create frames for pan-zoom animation with vertical movement
+    """Create frames for pan-zoom animation (vertical or horizontal)
 
     Args:
         image: The image to animate (numpy.ndarray, already fitted to canvas with letterboxing)
         width: Video width in pixels
         height: Video height in pixels
         duration_seconds: Duration of animation in seconds
-        direction: "up" or "down" - direction of pan movement
+        direction: "up", "down", "left", "right" (default from config). 
         zoom_level: Zoom factor (1.0 = no zoom, 1.1 = 10% zoom in). Default uses config.
-        pan_distance_ratio: Pan distance as ratio of image height (0.0-1.0). Default uses config.
+        pan_distance_ratio: Pan distance as ratio of dimension (0.0-1.0). Default uses config.
 
     Returns:
         list: List of frames (numpy.ndarray) for the animation
     """
+    if direction is None:
+        direction = DEFAULT_PAN_DIRECTION
     if zoom_level is None:
         zoom_level = DEFAULT_ZOOM_LEVEL
     if pan_distance_ratio is None:
@@ -38,33 +40,34 @@ def create_pan_zoom_animation(image, width, height, duration_seconds, direction=
     zoomed_image = cv2.resize(image, (zoomed_width, zoomed_height), 
                               interpolation=cv2.INTER_LANCZOS4)
     
-    # Calculate center offsets for cropping (centered initially)
+    # Center offsets
     center_x = (zoomed_width - width) // 2
     center_y = (zoomed_height - height) // 2
     
-    # Calculate available pan space (how much we can actually pan)
-    # Available space is the distance from center to the edge of the zoomed image
-    available_pan_space_up = center_y  # How far we can pan upward (negative direction)
-    available_pan_space_down = zoomed_height - height - center_y  # How far we can pan downward (positive direction)
+    # Available pan spaces for all directions
+    avail_up = center_y
+    avail_down = zoomed_height - height - center_y
+    avail_left = center_x
+    avail_right = zoomed_width - width - center_x
     
-    # Calculate requested pan distance
-    requested_pan_distance = int(height * pan_distance_ratio)
+    # Requested distance: height for vert, width for horiz
+    if direction in ("up", "down"):
+        requested_pan_distance = int(height * pan_distance_ratio)
+        max_available = min(avail_up, avail_down)
+    else:  # left or right
+        requested_pan_distance = int(width * pan_distance_ratio)
+        max_available = min(avail_left, avail_right)
     
-    # Use the minimum of requested distance and available space to prevent clamping
-    # For "up" direction, we can pan up to available_pan_space_up
-    # For "down" direction, we can pan up to available_pan_space_down
-    # We'll use the smaller of the two to ensure both directions work
-    max_available_pan = min(available_pan_space_up, available_pan_space_down)
-    pan_distance_pixels = min(requested_pan_distance, max_available_pan)
+    pan_distance_pixels = min(requested_pan_distance, max_available)
     
-    # If pan distance is 0, set a minimum to ensure some movement
+    # Minimum movement if zero
     if pan_distance_pixels == 0:
-        pan_distance_pixels = max(1, max_available_pan)
+        pan_distance_pixels = max(1, max_available)
     
-    # Debug: warn if pan distance was reduced due to available space
+    # Note if reduced
     if pan_distance_pixels < requested_pan_distance:
         print(f"  Note: Pan distance reduced from {requested_pan_distance}px to {pan_distance_pixels}px "
-              f"(available space: {max_available_pan}px)")
+              f"(avail: {max_available}px)")
     
     # Generate frames
     total_frames = int(duration_seconds * FPS)
@@ -76,23 +79,27 @@ def create_pan_zoom_animation(image, width, height, duration_seconds, direction=
         else:
             progress = frame_idx / (total_frames - 1)
         
-        # Use linear progress directly (no easing for constant speed)
-        # Calculate vertical offset based on direction
+        # Linear progress, calculate offset based on direction
         if direction == "up":
-            # Pan UP: start at top (negative offset), move down (toward 0)
-            # This means we start showing the top of the zoomed image and pan downward
             offset_y = -pan_distance_pixels * (1 - progress)
-        else:  # down
-            # Pan DOWN: start at bottom (positive offset), move up (toward 0)
-            # This means we start showing the bottom of the zoomed image and pan upward
-            # Start at bottom (positive offset) and move to center (0)
+            offset_x = 0
+        elif direction == "down":
             offset_y = pan_distance_pixels * (1 - progress)
+            offset_x = 0
+        elif direction == "left":
+            offset_x = -pan_distance_pixels * (1 - progress)
+            offset_y = 0
+        elif direction == "right":
+            offset_x = pan_distance_pixels * (1 - progress)
+            offset_y = 0
+        else:
+            offset_x = offset_y = 0
         
-        # Calculate crop region
-        crop_x = center_x
+        # Crop region
+        crop_x = center_x + int(offset_x)
         crop_y = center_y + int(offset_y)
         
-        # Ensure crop region is within bounds
+        # Bounds check
         crop_x = max(0, min(crop_x, zoomed_width - width))
         crop_y = max(0, min(crop_y, zoomed_height - height))
         

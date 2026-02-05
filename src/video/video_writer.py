@@ -9,7 +9,7 @@ from ..config.config import (
     DEFAULT_TOTAL_DURATION, ZIG_ZAG_AMPLITUDE, OUTPUT_DIR, TEMP_DIR,
     calculate_dimensions, calculate_cursor_size
 )
-from ..image.image_utils import load_and_resize_image
+from ..image.image_utils import load_and_resize_image, load_avatar_video_frames
 from ..animation.animation import create_single_reveal_animation, create_static_hold_frames
 from ..animation.pan_zoom_animation import create_pan_zoom_animation
 from ..cleanup.cleanup_utils import ensure_output_dir
@@ -18,6 +18,7 @@ from ..aws.aws_utils import upload_to_s3
 from ..captions.caption_overlay import overlay_captions_on_frames
 # Common utils for error handling and config validation
 from ..utils.config_utils import validate_image_configs
+from ..utils.error_handler import handle_error
 # Colored logging for differentiation
 from ..utils.log_utils import log_success, log_info, log_warning
 
@@ -361,18 +362,60 @@ def create_multi_reveal_video(image_configs, output_path, pencil_cursor, pencil_
     return output_path, s3_url
 
 
+def _overlay_root_avatars(frames, avatars, fps, width, height, cleanup_manager=None):
+    """Overlay root-level avatar videos (green screen) at specific times.
+
+    Each avatar resized to bottom 1/3 of video, centered.
+    """
+    if not avatars:
+        return
+    for av in avatars:
+        url = av.get("url")
+        start_sec = av.get("start", 0.0)
+        dur_sec = av.get("duration", 5.0)
+        if not url:
+            continue
+        print(f"  Overlaying avatar from {url} at {start_sec}s for {dur_sec}s")
+        # Load processed fg frames
+        av_frames = load_avatar_video_frames(url, dur_sec, width, height, cleanup_manager)
+        start_f = int(start_sec * fps)
+        end_f = start_f + len(av_frames)
+        for f_idx in range(start_f, min(end_f, len(frames))):
+            av_f = av_frames[f_idx - start_f]
+            # Resize to occupy bottom 1/3 height, keep aspect, center x
+            target_h = height // 3
+            scale = target_h / av_f.shape[0]
+            target_w = int(av_f.shape[1] * scale)
+            av_resized = cv2.resize(av_f, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+            ah, aw = av_resized.shape[:2]
+            y = height - ah
+            x = (width - aw) // 2
+            if y < 0 or x < 0 or y + ah > height or x + aw > width:
+                continue
+            roi = frames[f_idx][y:y+ah, x:x+aw]
+            # Mask fg (non-black; low thresh preserves dark hair)
+            gray = cv2.cvtColor(av_resized, cv2.COLOR_BGR2GRAY)
+            _, mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+            mask_inv = cv2.bitwise_not(mask)
+            bg = cv2.bitwise_and(roi, roi, mask=mask_inv)
+            fg = cv2.bitwise_and(av_resized, av_resized, mask=mask)
+            frames[f_idx][y:y+ah, x:x+aw] = cv2.add(bg, fg)
+
+
 def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
                           audio_path=None, audio_volume=1.0, upload_to_aws=False,
                           aspect_ratio=None, quality=None, zoom_level=None,
-                          pan_distance_ratio=None, captions=None, caption_options=None):
+                          pan_distance_ratio=None, pan_direction=None,
+                          captions=None, caption_options=None, avatars=None):
     """Create a video with pan-zoom animation for multiple images
 
-    Images are zoomed in and pan vertically with alternating directions (up/down).
+    Per-image 'direction' in config JSON (optional; falls back to root pan_direction).
+    Root-level 'avatars' array optional for timed green-screen character overlays.
 
     Args:
-        image_configs: List of dicts with 'image' (path/URL) and 'seconds' (duration) keys
+        image_configs: List of dicts with 'image' (path/URL), 'seconds' (duration); optional 'direction'
                       Example: [
-                          {'image': 'path/to/img1.png', 'seconds': 5},
+                          {'image': 'path/to/img1.png', 'seconds': 5, 'direction': 'left'},
                           {'image': 'https://example.com/img2.png', 'seconds': 4}
                       ]
         output_path: Path to output video file
@@ -383,20 +426,27 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
         aspect_ratio: Aspect ratio (e.g., '16:9', '9:16', default None uses config default)
         quality: Quality preset (e.g., '720p', '1080p', default None uses config default)
         zoom_level: Zoom factor (1.0 = no zoom, 1.1 = 10% zoom in, default uses config)
-        pan_distance_ratio: Pan distance as ratio of image height (0.0-1.0, default uses config)
+        pan_distance_ratio: Pan distance ratio (0.0-1.0, default uses config)
+        pan_direction: Root/default direction "up","down","left","right" (default from config; per-image overrides)
+        caption_options: Optional dict to override caption style/pop (see caption_overlay.DEFAULT_CAPTION_OPTIONS)
+        avatars: Optional list of dicts [{'url': str, 'start': float, 'duration': float}] for root-level green-screen overlays
 
     Returns:
         tuple: (Path to video file, S3 URL if uploaded else None)
     """
     # Relative import for grouped structure
     # Relative import for grouped structure (config now in subdir)
-    from ..config.config import DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO
+    from ..config.config import DEFAULT_ZOOM_LEVEL, DEFAULT_PAN_DISTANCE_RATIO, DEFAULT_PAN_DIRECTION
     
     # Use defaults if not provided
     if zoom_level is None:
         zoom_level = DEFAULT_ZOOM_LEVEL
     if pan_distance_ratio is None:
         pan_distance_ratio = DEFAULT_PAN_DISTANCE_RATIO
+    if pan_direction is None:
+        pan_direction = DEFAULT_PAN_DIRECTION
+    if pan_direction not in ["up", "down", "left", "right"]:
+        handle_error(f"Invalid pan_direction '{pan_direction}'. Must be one of: up, down, left, right.")
 
     # Validate configs using shared utils (common functionality in src/utils)
     validate_image_configs(image_configs, require_image_key=False)
@@ -406,7 +456,7 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
     if aspect_ratio or quality:
         print(f"Using dimensions: {width}x{height} ({aspect_ratio or 'default ratio'}, {quality or 'default quality'})")
 
-    print(f"Pan-zoom settings: zoom={zoom_level}x, pan={pan_distance_ratio*100:.0f}% of height")
+    print(f"Pan-zoom settings: zoom={zoom_level}x, pan={pan_distance_ratio*100:.0f}%, dir={pan_direction} (per-image overrides)")
 
     # Ensure output directory and resolve path
     output_path = _resolve_output_path(output_path)
@@ -414,12 +464,10 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
     all_frames = []
 
     for idx, config in enumerate(image_configs):
-        # Support both 'image' and 'url' keys
+        # Support both 'image' and 'url' keys; per-image direction (fallback to root/global)
         image_path = config.get('image') or config.get('url')
         seconds = config.get('seconds', 5.0)
-
-        # Alternate direction: even indices = up, odd indices = down
-        direction = "up" if idx % 2 == 0 else "down"
+        direction = config.get('direction') or pan_direction
 
         # Load image
         print(f"\n[{idx+1}/{len(image_configs)}] Loading: {image_path}")
@@ -427,17 +475,54 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
 
         print(f"  Direction: {direction}, Duration: {seconds}s")
 
+        # Optional avatar video (green screen character; download/process/overlay)
+        avatar_frames = []
+        avatar_video = config.get("avatar_video")
+        if avatar_video:
+            print(f"  Processing avatar video: {avatar_video}")
+            avatar_frames = load_avatar_video_frames(
+                avatar_video, seconds, width, height, cleanup_manager
+            )
+
         # Generate pan-zoom frames for this image
         frames = create_pan_zoom_animation(
             main_image, width, height, seconds, direction,
             zoom_level=zoom_level, pan_distance_ratio=pan_distance_ratio
         )
+
+        # Composite avatar frames onto animation (bottom 1/3 of video)
+        if avatar_frames:
+            for f_idx, frame in enumerate(frames):
+                if f_idx < len(avatar_frames):
+                    av = avatar_frames[f_idx]
+                    # Resize to occupy bottom 1/3 height, keep aspect, center x
+                    target_h = height // 3
+                    scale = target_h / av.shape[0]
+                    target_w = int(av.shape[1] * scale)
+                    av_resized = cv2.resize(av, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+                    ah, aw = av_resized.shape[:2]
+                    y = height - ah
+                    x = (width - aw) // 2
+                    roi = frame[y:y+ah, x:x+aw]
+                    # Mask non-black (fg) from avatar (low thresh preserves dark hair)
+                    gray = cv2.cvtColor(av_resized, cv2.COLOR_BGR2GRAY)
+                    _, mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+                    mask_inv = cv2.bitwise_not(mask)
+                    bg = cv2.bitwise_and(roi, roi, mask=mask_inv)
+                    fg = cv2.bitwise_and(av_resized, av_resized, mask=mask)
+                    frame[y:y+ah, x:x+aw] = cv2.add(bg, fg)
+
         all_frames.extend(frames)
         print(f"  Generated {len(frames)} frames")
 
     # Optional: overlay captions
     if captions:
         overlay_captions_on_frames(all_frames, captions, FPS, width, height, caption_options or {})
+
+    # Optional root-level avatar overlays (green screen characters at specific times; on top of everything)
+    if avatars:
+        print("Overlaying root-level avatar videos...")
+        _overlay_root_avatars(all_frames, avatars, FPS, width, height, cleanup_manager)
 
     # Write all frames to video
     print(f"\nWriting final video: {output_path}")

@@ -161,7 +161,9 @@ Each object requires:
 - **URL Support**: Download images directly from URLs
 - **Background Music**: Add looping background music to videos (mp3, wav, etc.)
 - **AWS S3 Upload**: Automatically upload videos to S3 and get public URLs
-- **Optional Captions**: Add timed word/letter captions from a JSON file (`--captions`); white text with black outline, with optional emphasized current word
+- **Optional Captions**: Add timed word/letter captions from a JSON file (`--captions`); white text with black outline + pop-in scale animation per word (timing unchanged)
+- **Pan Direction**: Per-image in config JSON (optional 'direction' key: up/down/left/right) or root default (via --pan-direction or DEFAULT_PAN_DIRECTION in config.py)
+- **Avatar Videos**: Optional root "avatars" array in payload/JSON (array of {url, start, duration} for green-screen character overlays at times)
 - **Performance Optimized**: 30 FPS default, vectorized operations for faster generation
 - **Auto Cleanup**: Temporary files are automatically removed after video generation
 - **Organized Output**: All videos saved to `output/` directory
@@ -177,7 +179,7 @@ python -m src.cli.pencil_reveal image.png --captions captions.json output.mp4
 python -m src.cli.pan_zoom config.json --captions captions.json output.mp4
 ```
 
-**Captions JSON format:** (auto-detected) Either an array of `{ "text": "word", "start": 0.0, "end": 0.5 }`, or ElevenLabs timing-only payload `{ "text": "...", "alignment": { "characters", "character_start_times_seconds", "character_end_times_seconds" } }`. No extra dependencies: uses Pillow (already in `requirements.txt`).
+**Captions JSON format:** (auto-detected) Either an array of `{ "text": "word", "start": 0.0, "end": 0.5 }`, or ElevenLabs timing-only payload `{ "text": "...", "alignment": {...}, "highlighted_words": ["special", "terms"], "highlight_color": [255, 0, 0] }`. Each word pops in (scale); highlighted use custom color. No extra deps: Pillow.
 
 ## Configuration
 
@@ -186,13 +188,14 @@ The default settings are optimized for performance and quality:
 - **Default Quality**: 720p (HD, good balance of quality and speed)
 - **Frame Rate**: 30 FPS (smooth animation, fast generation)
 
-You can override these with CLI flags (`--ratio`, `--quality`) or edit `src/config.py` to customize:
+You can override these with CLI flags (`--ratio`, `--quality`, `--pan-direction`) or edit `src/config.py` to customize:
 - Aspect ratio presets and defaults
 - Quality presets and defaults
 - Frame rate (FPS)
 - Animation durations
 - Zig-zag amplitude and angle
 - Cursor size
+- Pan direction (DEFAULT_PAN_DIRECTION; per-image override in JSON)
 - Output and temp directory paths
 
 **Performance Note**: Generation time is approximately:

@@ -154,3 +154,69 @@ def resolve_audio_path(path_or_url, cleanup_manager=None):
         return download_audio(path_or_url, cleanup_manager)
     else:
         return Path(path_or_url)
+
+
+def download_video(url, cleanup_manager=None):
+    """Download a video from a URL to a temporary file (for avatar videos with green screen)
+
+    Args:
+        url: URL of the video (mp4 etc.)
+        cleanup_manager: Optional CleanupManager instance to register temp file
+
+    Returns:
+        Path: Path to the downloaded temporary file
+
+    Raises:
+        ValueError: If download fails or URL is invalid
+    """
+    if not is_url(url):
+        raise ValueError(f"Invalid URL: {url}")
+
+    try:
+        # Get file extension from URL or default to mp4
+        parsed_url = urlparse(url)
+        path = parsed_url.path
+        ext = Path(path).suffix if Path(path).suffix else '.mp4'
+
+        # Create unique filename using URL hash
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+        filename = f"avatar_video_{url_hash}{ext}"
+
+        # Use configured temp directory
+        temp_dir = TEMP_DIR
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = temp_dir / filename
+
+        # Download the video
+        response = requests.get(url, timeout=60, stream=True)  # longer timeout for videos
+        response.raise_for_status()
+
+        # Write content to file (silent)
+        with open(temp_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        # Register for cleanup
+        if cleanup_manager:
+            cleanup_manager.register_temp_file(temp_path)
+
+        return temp_path
+
+    except requests.RequestException as e:
+        raise ValueError(f"Failed to download video from {url}: {e}")
+
+
+def resolve_video_path(path_or_url, cleanup_manager=None):
+    """Resolve a video path or URL to a local file path
+
+    Args:
+        path_or_url: Either a local file path or a URL
+        cleanup_manager: Optional CleanupManager instance for temp file cleanup
+
+    Returns:
+        Path: Local file path (downloaded if URL)
+    """
+    if is_url(path_or_url):
+        return download_video(path_or_url, cleanup_manager)
+    else:
+        return Path(path_or_url)

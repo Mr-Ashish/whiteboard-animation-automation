@@ -3,7 +3,7 @@
 # Pan-Zoom Video Generator Script
 # Usage: ./run_pan_zoom.sh <payload.json>
 # Example: ./run_pan_zoom.sh test_payload.json
-# Payload file (in project root) must contain: images, optional audio, ratio, quality, captions.
+# Payload file (in project root) must contain: images, optional audio, ratio, quality, captions, avatars (array of {url, start, duration}).
 
 set -e
 
@@ -91,6 +91,21 @@ else:
     CAPTIONS_FILE="$TEMP_CAPTIONS"
 fi
 
+# Extract avatars array (array of {url, start, duration} for green-screen overlays) if present
+TEMP_AVATARS="$TEMP_DIR/avatars.json"
+AVATARS_FILE=""
+if echo "$JSON_INPUT" | python -c "
+import sys, json
+d = json.load(sys.stdin)
+a = d.get('avatars')
+if a is not None:
+    json.dump(a, sys.stdout)
+else:
+    sys.exit(1)
+" > "$TEMP_AVATARS" 2>/dev/null; then
+    AVATARS_FILE="$TEMP_AVATARS"
+fi
+
 # Build command for pan-zoom script
 CMD="python -m src.cli.pan_zoom $TEMP_CONFIG"
 
@@ -108,6 +123,10 @@ fi
 
 if [ -n "$CAPTIONS_FILE" ]; then
     CMD="$CMD --captions $CAPTIONS_FILE"
+fi
+
+if [ -n "$AVATARS_FILE" ]; then
+    CMD="$CMD --avatars $AVATARS_FILE"
 fi
 
 CMD="$CMD --upload"

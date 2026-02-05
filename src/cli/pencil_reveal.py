@@ -130,12 +130,14 @@ def _handle_single_image_mode():
     # Load or create pencil cursor
     pencil_cursor, cursor_size = _load_cursor(hand_pencil_path, use_custom_cursor)
 
-    # Load captions if requested
+    # Load captions if requested (plus highlight options if in JSON)
     captions = None
+    caption_options = {}
     if captions_path:
         # Relative import for grouped structure (captions now in subdir)
-        from ..captions.caption_overlay import load_captions_from_json
+        from ..captions.caption_overlay import load_captions_from_json, extract_highlight_options
         captions = load_captions_from_json(str(captions_path))
+        caption_options = extract_highlight_options(str(captions_path))
         log_info(f"Loaded {len(captions)} caption segments from {captions_path}")
 
     # Generate video with cleanup
@@ -159,6 +161,7 @@ def _handle_single_image_mode():
                 quality=quality,
                 duration_seconds=1.0,
                 captions=captions,
+                caption_options=caption_options,
             )
 
         else:
@@ -172,6 +175,7 @@ def _handle_single_image_mode():
                 aspect_ratio=aspect_ratio,
                 quality=quality,
                 captions=captions,
+                caption_options=caption_options,
             )
 
     log_info("\n✓ Cleanup complete - all temporary files removed")
@@ -229,12 +233,14 @@ def _handle_multi_image_mode():
     # Load or create pencil cursor
     pencil_cursor, cursor_size = _load_cursor(hand_pencil_path, use_custom_cursor)
 
-    # Load captions if requested
+    # Load captions if requested (plus highlight options if in JSON)
     captions = None
+    caption_options = {}
     if captions_path:
         # Relative import for grouped structure (captions now in subdir)
-        from ..captions.caption_overlay import load_captions_from_json
+        from ..captions.caption_overlay import load_captions_from_json, extract_highlight_options
         captions = load_captions_from_json(str(captions_path))
+        caption_options = extract_highlight_options(str(captions_path))
         log_info(f"Loaded {len(captions)} caption segments from {captions_path}")
 
     # Generate video with cleanup
@@ -252,6 +258,7 @@ def _handle_multi_image_mode():
             aspect_ratio=aspect_ratio,
             quality=quality,
             captions=captions,
+            caption_options=caption_options,
         )
 
     log_info("\n✓ Cleanup complete - all temporary files removed")

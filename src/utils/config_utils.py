@@ -7,7 +7,7 @@ from ..download.download_utils import is_url
 
 
 def validate_image_configs(image_configs, require_image_key=True, validate_types=False):
-    """Validate image configs list (common functionality in utils)."""
+    """Validate image configs list (common; supports optional 'direction', 'avatar_video' for pan_zoom)."""
     if not isinstance(image_configs, list):
         handle_error("Config JSON must be an array of objects")
 
@@ -30,6 +30,16 @@ def validate_image_configs(image_configs, require_image_key=True, validate_types
             image_type = config.get("type", "scene")
             if image_type not in ["scene", "cover"]:
                 handle_error(f"Invalid type '{image_type}' at index {idx}. Must be 'scene' or 'cover'")
+
+        # Optional per-image pan direction (for pan_zoom; ignored elsewhere; defaults to config root)
+        dir_val = config.get("direction")
+        if dir_val and dir_val not in ["up", "down", "left", "right"]:
+            handle_error(f"Invalid 'direction' '{dir_val}' at index {idx}. Must be up/down/left/right or omit for default.")
+
+        # Optional avatar_video (URL for green-screen character video; validated on resolve)
+        avatar_val = config.get("avatar_video")
+        if avatar_val and not (is_url(avatar_val) or Path(avatar_val).exists()):
+            handle_error(f"Invalid 'avatar_video' at index {idx}: must be URL or existing file")
 
 
 def load_and_validate_image_configs(config_path_str, require_image_key=True, validate_types=False):

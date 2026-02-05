@@ -106,3 +106,4 @@ def calculate_cursor_size(width, height):
 # Pan-zoom animation settings
 DEFAULT_ZOOM_LEVEL = 1.1  # 10% zoom in (1.0 = no zoom, 1.1 = 10% larger)
 DEFAULT_PAN_DISTANCE_RATIO = 0.15  # 15% of image height as pan distance
+DEFAULT_PAN_DIRECTION = "up"  # "up", "down", "left", "right" - starting direction for pan-zoom (alternates for multi-image)

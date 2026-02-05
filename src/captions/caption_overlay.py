@@ -2,9 +2,8 @@
 
 Supports TrueType (.ttf) and OpenType (.otf) fonts via font_path or src/assets/fonts/.
 
-When captions are enabled, each frame shows a single line of text that changes over time:
-the current word/segment for that moment (based on caption start/end times). Text is
-drawn with white fill and black outline for readability.
+Each frame shows the current word (per timing); optional pop-scale on appear + 
+highlighted_words array (with custom color) from captions JSON config.
 """
 
 import json
@@ -32,6 +31,13 @@ DEFAULT_CAPTION_OPTIONS = {
     "line2_y_ratio": 0.5,       # Vertical position of the current word (fraction of height)
     "show_emphasized": True,    # If False, no text is drawn
     "word_separator": " ",      # Used when building full_text in _get_current_segment
+    # Pop animation for each word (scale from small to full; timing unchanged)
+    "pop_effect": True,
+    "pop_scale_start": 0.6,     # Start at 60% size
+    "pop_duration_ratio": 0.25, # Pop over first 25% of word duration
+    # Highlighted words (list; if current word matches, use highlight_color)
+    "highlighted_words": [],    # e.g. ["key", "term"]
+    "highlight_color": (255, 215, 0),  # Gold RGB default
 }
 
 
@@ -226,31 +232,53 @@ def load_captions_from_json_data(
     return segments
 
 
+def extract_highlight_options(path_or_data: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Extract 'highlighted_words' and 'highlight_color' from captions JSON/dict (ElevenLabs-style).
+
+    Returns subset dict for caption_options (empty if absent).
+    """
+    if isinstance(path_or_data, dict):
+        data = path_or_data
+    else:
+        p = Path(path_or_data)
+        if not p.exists():
+            return {}
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    opts = {}
+    if isinstance(data, dict):
+        if "highlighted_words" in data and isinstance(data["highlighted_words"], list):
+            # Normalize to lower for case-insensitive match
+            opts["highlighted_words"] = [str(w).lower() for w in data["highlighted_words"]]
+        if "highlight_color" in data:
+            col = data["highlight_color"]
+            if isinstance(col, (list, tuple)) and len(col) == 3:
+                opts["highlight_color"] = tuple(int(c) for c in col)
+    return opts
+
+
 def _get_current_segment(
     t_sec: float,
     segments: List[Tuple[str, float, float]],
-) -> Tuple[str, Optional[str], Optional[int]]:
-    """Return (full_text, current_text, current_index) for time t_sec.
+) -> Tuple[str, Optional[str], Optional[int], Optional[float], Optional[float]]:
+    """Return (full_text, current_text, current_index, start_sec, end_sec) for t_sec.
 
-    segments: list of (text, start_sec, end_sec).
-    Only current_text is used for drawing (the word/segment active at t_sec).
+    Only current_text used for drawing; timings enable pop progress calc.
     """
     if not segments:
-        return "", None, None
+        return "", None, None, None, None
     # Full line is all segments joined (kept for possible future use; not drawn)
     full_text = DEFAULT_CAPTION_OPTIONS["word_separator"].join(s[0] for s in segments)
-    current_index = None
     # Current word is the segment whose [start, end) contains t_sec
     for i, (text, start, end) in enumerate(segments):
         if start <= t_sec < end:
-            current_index = i
-            return full_text, text, i
-    # After last segment: keep showing last word
+            return full_text, text, i, start, end
+    # After last: keep last word (full duration for pop if needed)
     if t_sec >= segments[-1][2]:
-        current_index = len(segments) - 1
-        return full_text, segments[-1][0], current_index
-    # Before first segment: no current word
-    return full_text, None, None
+        last_start, last_end = segments[-1][1], segments[-1][2]
+        return full_text, segments[-1][0], len(segments) - 1, last_start, last_end
+    # Before first: none
+    return full_text, None, None, None, None
 
 
 def _draw_text_with_outline(
@@ -287,8 +315,7 @@ def overlay_captions_on_frame(
 ) -> None:
     """Draw the current caption segment on a single BGR frame in place.
 
-    Only one line is drawn: the word/segment whose [start, end) contains t_sec.
-    Nothing is drawn before the first segment; after the last, the last word stays visible.
+    Only current word drawn; optional pop-scale on appear (timing unchanged).
 
     Args:
         frame_bgr: OpenCV BGR frame (H, W, 3), modified in place.
@@ -302,18 +329,22 @@ def overlay_captions_on_frame(
     opts = {**DEFAULT_CAPTION_OPTIONS, **(options or {})}
     if not opts["show_emphasized"]:
         return
-    fill = opts["fill_color"]
     stroke_fill = opts["stroke_color"]
     stroke_width = opts["stroke_width"]
     font = _get_font(opts["font_path"], opts["font_size_emphasized"])
     line_y_ratio = opts["line2_y_ratio"]
 
-    # Get the segment active at this time (only current_text is drawn)
-    _, current_text, _ = _get_current_segment(t_sec, segments)
+    # Get current segment + timings for pop progress
+    _, current_text, _, seg_start, seg_end = _get_current_segment(t_sec, segments)
     if not current_text:
         return
 
-    # Convert frame to PIL for drawing (Pillow supports outline text)
+    # Highlight check: if word in list (case-insensitive), use special color
+    fill = opts["fill_color"]
+    if opts["highlighted_words"] and current_text.lower() in opts["highlighted_words"]:
+        fill = opts["highlight_color"]
+
+    # Convert frame to PIL
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(frame_rgb)
     draw = ImageDraw.Draw(pil_img)
@@ -326,13 +357,51 @@ def overlay_captions_on_frame(
         except (TypeError, AttributeError):
             return len(text) * (opts["font_size_emphasized"] // 2)
 
-    # Single line: current word only, centered (horizontal and at line_y_ratio of height)
+    # Single line: current word, centered at line_y_ratio
     line_y = int(height * line_y_ratio)
     tw = _text_width(draw, current_text, font)
-    x = (width - tw) // 2
-    _draw_text_with_outline(
-        draw, x, line_y, current_text, font, fill, stroke_fill, stroke_width, anchor="lt"
-    )
+    base_x = (width - tw) // 2
+
+    # Pop animation: scale up during first pop_duration_ratio of word time (linear ease)
+    # Keeps overall word timing/speed identical; just adds visual pop on appear
+    if opts["pop_effect"] and seg_start is not None and seg_end is not None:
+        dur = seg_end - seg_start
+        if dur > 0:
+            local_prog = max(0.0, min(1.0, (t_sec - seg_start) / dur))
+            pop_ratio = opts["pop_duration_ratio"]
+            if local_prog < pop_ratio:
+                # Pop from pop_scale_start to 1.0
+                pop_prog = local_prog / pop_ratio
+                scale = opts["pop_scale_start"] + (1.0 - opts["pop_scale_start"]) * pop_prog
+            else:
+                scale = 1.0
+        else:
+            scale = 1.0
+    else:
+        scale = 1.0
+
+    if scale == 1.0:
+        # No pop: direct draw
+        _draw_text_with_outline(
+            draw, base_x, line_y, current_text, font, fill, stroke_fill, stroke_width, anchor="lt"
+        )
+    else:
+        # Pop: render to temp img at full size, scale, paste centered
+        temp = Image.new("RGBA", (int(tw * 1.2), int(opts["font_size_emphasized"] * 1.5)), (0, 0, 0, 0))
+        tdraw = ImageDraw.Draw(temp)
+        # Center in temp
+        t_x = (temp.width - tw) // 2
+        t_y = (temp.height - opts["font_size_emphasized"]) // 2
+        _draw_text_with_outline(
+            tdraw, t_x, t_y, current_text, font, fill, stroke_fill, stroke_width, anchor="lt"
+        )
+        # Scale temp
+        new_size = (int(temp.width * scale), int(temp.height * scale))
+        scaled = temp.resize(new_size, Image.LANCZOS)
+        # Paste centered on main (adjust for scale shrink)
+        paste_x = base_x - (new_size[0] - tw) // 2
+        paste_y = line_y - (new_size[1] - opts["font_size_emphasized"]) // 2
+        pil_img.paste(scaled, (paste_x, paste_y), scaled)
 
     # Write back to BGR frame
     frame_bgr[:] = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
