@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 # Relative import for grouped structure
 from ..download.download_utils import resolve_image_path, resolve_video_path
+from ..config.config import FPS
 
 
 def load_and_resize_image(image_path_or_url, target_width, target_height, cleanup_manager=None):
@@ -45,6 +46,72 @@ def load_and_resize_image(image_path_or_url, target_width, target_height, cleanu
     canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
 
     return canvas
+
+
+def _letterbox_frame(frame, target_width, target_height):
+    """Fit a single BGR frame to canvas with letterboxing (white fill). Same logic as load_and_resize_image."""
+    canvas = np.ones((target_height, target_width, 3), dtype=np.uint8) * 255
+    img_h, img_w = frame.shape[:2]
+    scale = min(target_width / img_w, target_height / img_h)
+    new_w = int(img_w * scale)
+    new_h = int(img_h * scale)
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+    x_offset = (target_width - new_w) // 2
+    y_offset = (target_height - new_h) // 2
+    canvas[y_offset : y_offset + new_h, x_offset : x_offset + new_w] = resized
+    return canvas
+
+
+def load_video_frames(video_path_or_url, first_n_seconds, target_width, target_height, cleanup_manager=None):
+    """Load first N seconds of a video as BGR frames, letterboxed to target size.
+
+    Args:
+        video_path_or_url: Local path or URL to video file
+        first_n_seconds: Use only the first N seconds of the video
+        target_width, target_height: Output frame size (letterboxed)
+        cleanup_manager: Optional CleanupManager for temp file cleanup
+
+    Returns:
+        list: List of BGR frames (numpy.ndarray), length = first_n_seconds * FPS
+    """
+    video_path = resolve_video_path(video_path_or_url, cleanup_manager)
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {video_path_or_url}")
+
+    video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    target_count = int(first_n_seconds * FPS)
+    frames = []
+    t = 0.0
+
+    while t < first_n_seconds:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        canvas = _letterbox_frame(frame, target_width, target_height)
+        frames.append(canvas)
+        t += 1.0 / video_fps
+
+    cap.release()
+
+    if not frames:
+        raise ValueError(f"Video produced no frames: {video_path_or_url}")
+
+    # Resample to exact target_count
+    n = len(frames)
+    if n >= target_count:
+        indices = np.linspace(0, n - 1, target_count, dtype=int)
+        frames = [frames[i] for i in indices]
+    elif target_count == 1:
+        frames = [frames[0]]
+    elif n == 1:
+        frames = [frames[0].copy() for _ in range(target_count)]
+    else:
+        # Spread source frames over target_count to avoid freeze at segment end
+        indices = [round(i * (n - 1) / (target_count - 1)) for i in range(target_count)]
+        frames = [frames[idx] for idx in indices]
+
+    return frames
 
 
 def remove_green_screen(frame, lower_green=np.array([35, 40, 40]), upper_green=np.array([85, 255, 255])):

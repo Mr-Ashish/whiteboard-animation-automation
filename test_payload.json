@@ -3,19 +3,27 @@
     {
       "image": "https://v3b.fal.media/files/b/0a8b3196/3Crb5oSW_OjaQV3Kxp05k.png",
       "seconds": 3,
-      "type": "scene",
       "direction": "up"
     },
     {
       "image": "https://v3b.fal.media/files/b/0a8b3196/1DqWNLuxaFTrgGCt0LuuO.png",
       "seconds": 3,
-      "type": "scene",
-      "direction": "left"
+      "direction": "left",
+      "enablePanZoom": false
+    },
+    {
+      "video": "https://v3b.fal.media/files/b/0a8d4803/sOIfEChoFPkc10h-KXYVE_8c5OjzZB.mp4",
+      "seconds": 6,
+      "enablePanZoom": true
+    },
+    {
+      "video": "https://v3b.fal.media/files/b/0a8d4803/sOIfEChoFPkc10h-KXYVE_8c5OjzZB.mp4",
+      "seconds": 6,
+      "enablePanZoom": false
     },
     {
       "image": "https://v3b.fal.media/files/b/0a8b3196/82VUJdPBAqDsMFt_wYIKk.png",
       "seconds": 3,
-      "type": "scene",
       "direction": "right"
     }
   ],
@@ -26,17 +34,17 @@
     "text": "This is a test video with captions.",
     "alignment": {
       "characters": ["T", "h", "i", "s", " ", "i", "s", " ", "a", " ", "t", "e", "s", "t", " ", "v", "i", "d", "e", "o", " ", "w", "i", "t", "h", " ", "c", "a", "p", "t", "i", "o", "n", "s", "."],
-      "character_start_times_seconds": [0.0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.96, 1.04, 1.12, 1.2, 1.28, 1.36, 1.44, 1.52, 1.6, 1.68, 1.76, 1.84, 1.92, 2.0, 2.08, 2.16, 2.24, 2.32, 2.4, 2.48, 2.56, 2.64, 2.72],
-      "character_end_times_seconds": [0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.96, 1.04, 1.12, 1.2, 1.28, 1.36, 1.44, 1.52, 1.6, 1.68, 1.76, 1.84, 1.92, 2.0, 2.08, 2.16, 2.24, 2.32, 2.4, 2.48, 2.56, 2.64, 2.72, 2.8]
-    },
-    "highlighted_words": ["test", "video"],
-    "highlight_color": [255, 0, 0]
+      "character_start_times_seconds": [0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.96, 1.04, 1.12, 1.2, 1.28, 1.36, 1.44, 1.52, 1.6, 1.68, 1.76, 1.84, 1.92, 2, 2.08, 2.16, 2.24, 2.32, 2.4, 2.48, 2.56, 2.64, 2.72],
+      "character_end_times_seconds": [0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.96, 1.04, 1.12, 1.2, 1.28, 1.36, 1.44, 1.52, 1.6, 1.68, 1.76, 1.84, 1.92, 2, 2.08, 2.16, 2.24, 2.32, 2.4, 2.48, 2.56, 2.64, 2.72, 2.8]
+    }
   },
+  "highlighted_words": ["test", "video"],
+  "highlight_color": [255, 0, 0],
   "avatars": [
     {
       "url": "https://v3b.fal.media/files/b/0a8d255c/LKxBA6fx8aQInfOSnAgga_BirXJuAS.mp4",
-      "start": 1.0,
-      "duration": 2.0
+      "start": 1,
+      "duration": 2
     }
   ]
 }

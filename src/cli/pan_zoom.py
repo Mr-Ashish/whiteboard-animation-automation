@@ -13,9 +13,23 @@ from ..config.config import ASPECT_RATIOS, QUALITY_PRESETS, TEMP_DIR
 from ..download.download_utils import is_url, resolve_audio_path
 from ..cleanup.cleanup_utils import CleanupManager
 from ..utils.error_handler import handle_error
-from ..utils.config_utils import load_and_validate_image_configs
+from ..utils.config_utils import validate_image_configs
 # Colored logging for differentiation (success green, etc.)
 from ..utils.log_utils import log_success, log_info
+
+
+def _load_config(config_path_str):
+    """Load config from file. If wrapper object with 'images', return (images_list, payload). Else return (list, None)."""
+    config_path = Path(config_path_str)
+    if not config_path.exists():
+        handle_error(f"Config file not found: {config_path}")
+    with open(config_path, "r") as f:
+        data = json.load(f)
+    if isinstance(data, dict) and "images" in data:
+        return data["images"], data
+    if isinstance(data, list):
+        return data, None
+    handle_error("Config JSON must be an array of image configs or an object with an 'images' array")
 
 
 def main():
@@ -66,18 +80,20 @@ Output videos are saved to output/ directory.
     parser.add_argument("--avatars", help="JSON file with array of avatar videos: [{'url': 'https://...', 'start': 2.0, 'duration': 3.0}, ...] (green screen overlays)")
     parsed = parser.parse_args()
 
-    # Use shared config loader from utils (supports 'url' key)
-    image_configs = load_and_validate_image_configs(parsed.config, require_image_key=False)
+    # Load config: accept wrapper {"images": [...], "audio": ..., "ratio": ...} or raw array
+    image_configs, payload = _load_config(parsed.config)
+    validate_image_configs(image_configs, require_image_key=False, allow_video=True)
 
     output_video = parsed.output
-    audio_path = parsed.audio
+    audio_path = (payload.get("audio") if payload else None) or parsed.audio
     audio_volume = parsed.volume
     upload_to_aws = parsed.upload
-    aspect_ratio = parsed.ratio
-    quality = parsed.quality
+    aspect_ratio = (payload.get("ratio") if payload else None) or parsed.ratio
+    quality = (payload.get("quality") if payload else None) or parsed.quality
     pan_direction = parsed.pan_direction
     captions_path = parsed.captions
     avatars_path = parsed.avatars
+    avatars = payload.get("avatars") if payload else None
 
     if not 0.0 <= audio_volume <= 1.0:
         handle_error("--volume must be between 0.0 and 1.0")
@@ -87,13 +103,11 @@ Output videos are saved to output/ directory.
         if not captions_path.exists():
             handle_error(f"Captions file not found: {captions_path}")
 
-    avatars = None
-    if avatars_path:
-        avatars_path = Path(avatars_path)
-        if not avatars_path.exists():
+    if avatars is None and avatars_path:
+        ap = Path(avatars_path)
+        if not ap.exists():
             handle_error(f"Avatars file not found: {avatars_path}")
-        # Load avatars list (array of {url, start, duration})
-        with open(avatars_path, "r") as f:
+        with open(ap, "r") as f:
             avatars = json.load(f)
         log_info(f"Loaded {len(avatars)} avatar video(s) from {avatars_path}")
 

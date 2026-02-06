@@ -111,5 +111,89 @@ def create_pan_zoom_animation(image, width, height, duration_seconds, direction=
             frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LANCZOS4)
         
         frames.append(frame)
-    
+
     return frames
+
+
+def apply_pan_zoom_to_frames(frames, width, height, direction=None, zoom_level=None, pan_distance_ratio=None):
+    """Apply the same pan-zoom animation to each frame in a list (e.g. from a video clip).
+
+    Each input frame is zoomed and cropped with the same progression as create_pan_zoom_animation,
+    so output has one frame per input frame with pan-zoom effect applied.
+
+    Args:
+        frames: List of BGR frames (each already width x height or will be treated as such)
+        width: Output width
+        height: Output height
+        direction: "up", "down", "left", "right"
+        zoom_level: Zoom factor (e.g. 1.1)
+        pan_distance_ratio: Pan distance as ratio of dimension
+
+    Returns:
+        list: List of BGR frames with pan-zoom applied
+    """
+    if direction is None:
+        direction = DEFAULT_PAN_DIRECTION
+    if zoom_level is None:
+        zoom_level = DEFAULT_ZOOM_LEVEL
+    if pan_distance_ratio is None:
+        pan_distance_ratio = DEFAULT_PAN_DISTANCE_RATIO
+
+    if not frames:
+        return []
+
+    total_frames = len(frames)
+    img_height, img_width = frames[0].shape[:2]
+    zoomed_width = int(img_width * zoom_level)
+    zoomed_height = int(img_height * zoom_level)
+    center_x = (zoomed_width - width) // 2
+    center_y = (zoomed_height - height) // 2
+    avail_up = center_y
+    avail_down = zoomed_height - height - center_y
+    avail_left = center_x
+    avail_right = zoomed_width - width - center_x
+
+    if direction in ("up", "down"):
+        requested_pan_distance = int(height * pan_distance_ratio)
+        max_available = min(avail_up, avail_down)
+    else:
+        requested_pan_distance = int(width * pan_distance_ratio)
+        max_available = min(avail_left, avail_right)
+    pan_distance_pixels = min(requested_pan_distance, max_available)
+    if pan_distance_pixels == 0:
+        pan_distance_pixels = max(1, max_available)
+
+    out_frames = []
+    for frame_idx in range(total_frames):
+        if total_frames == 1:
+            progress = 0.0
+        else:
+            progress = frame_idx / (total_frames - 1)
+
+        if direction == "up":
+            offset_y = -pan_distance_pixels * (1 - progress)
+            offset_x = 0
+        elif direction == "down":
+            offset_y = pan_distance_pixels * (1 - progress)
+            offset_x = 0
+        elif direction == "left":
+            offset_x = -pan_distance_pixels * (1 - progress)
+            offset_y = 0
+        elif direction == "right":
+            offset_x = pan_distance_pixels * (1 - progress)
+            offset_y = 0
+        else:
+            offset_x = offset_y = 0
+
+        crop_x = center_x + int(offset_x)
+        crop_y = center_y + int(offset_y)
+        crop_x = max(0, min(crop_x, zoomed_width - width))
+        crop_y = max(0, min(crop_y, zoomed_height - height))
+
+        zoomed = cv2.resize(frames[frame_idx], (zoomed_width, zoomed_height), interpolation=cv2.INTER_LANCZOS4)
+        frame = zoomed[crop_y : crop_y + height, crop_x : crop_x + width].copy()
+        if frame.shape[0] != height or frame.shape[1] != width:
+            frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LANCZOS4)
+        out_frames.append(frame)
+
+    return out_frames

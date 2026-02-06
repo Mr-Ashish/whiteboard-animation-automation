@@ -6,25 +6,45 @@ from .error_handler import handle_error
 from ..download.download_utils import is_url
 
 
-def validate_image_configs(image_configs, require_image_key=True, validate_types=False):
-    """Validate image configs list (common; supports optional 'direction', 'avatar_video' for pan_zoom)."""
+def validate_image_configs(image_configs, require_image_key=True, validate_types=False, allow_video=False):
+    """Validate image configs list (common; supports optional 'direction', 'avatar_video' for pan_zoom).
+    If allow_video=True (pan_zoom), each item may have 'image'/'url' OR 'video'; optional 'enablePanZoom' and 'seconds' for video."""
     if not isinstance(image_configs, list):
         handle_error("Config JSON must be an array of objects")
 
     for idx, config in enumerate(image_configs):
-        if require_image_key:
-            if "image" not in config:
-                handle_error(f"Missing 'image' key in config at index {idx}")
-        else:
-            if "image" not in config and "url" not in config:
-                handle_error(f"Missing 'image' or 'url' key in config at index {idx}")
+        has_image = "image" in config or "url" in config
+        has_video = "video" in config
 
-        image_arg = config.get("image") or config.get("url")
-        # Only validate local paths, URLs will be validated during download
-        if not is_url(image_arg):
-            image_path = Path(image_arg)
-            if not image_path.exists():
-                handle_error(f"Image not found: {image_arg}")
+        if allow_video:
+            if not has_image and not has_video:
+                handle_error(f"Config at index {idx}: must have 'image'/'url' or 'video'")
+            if has_image and has_video:
+                handle_error(f"Config at index {idx}: cannot have both 'image'/'url' and 'video'")
+            # Optional enablePanZoom (per-item; default True)
+            enable_pz = config.get("enablePanZoom")
+            if enable_pz is not None and not isinstance(enable_pz, bool):
+                handle_error(f"Invalid 'enablePanZoom' at index {idx}: must be true or false")
+            if has_video:
+                video_arg = config.get("video")
+                if not is_url(video_arg):
+                    video_path = Path(video_arg)
+                    if not video_path.exists():
+                        handle_error(f"Video not found: {video_arg}")
+        else:
+            if require_image_key:
+                if not has_image:
+                    handle_error(f"Missing 'image' key in config at index {idx}")
+            else:
+                if not has_image:
+                    handle_error(f"Missing 'image' or 'url' key in config at index {idx}")
+
+        if has_image:
+            image_arg = config.get("image") or config.get("url")
+            if not is_url(image_arg):
+                image_path = Path(image_arg)
+                if not image_path.exists():
+                    handle_error(f"Image not found: {image_arg}")
 
         if validate_types:
             image_type = config.get("type", "scene")

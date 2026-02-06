@@ -9,9 +9,9 @@ from ..config.config import (
     DEFAULT_TOTAL_DURATION, ZIG_ZAG_AMPLITUDE, OUTPUT_DIR, TEMP_DIR,
     calculate_dimensions, calculate_cursor_size
 )
-from ..image.image_utils import load_and_resize_image, load_avatar_video_frames
+from ..image.image_utils import load_and_resize_image, load_avatar_video_frames, load_video_frames
 from ..animation.animation import create_single_reveal_animation, create_static_hold_frames
-from ..animation.pan_zoom_animation import create_pan_zoom_animation
+from ..animation.pan_zoom_animation import create_pan_zoom_animation, apply_pan_zoom_to_frames
 from ..cleanup.cleanup_utils import ensure_output_dir
 from ..audio.audio_utils import match_video_to_audio_length
 from ..aws.aws_utils import upload_to_s3
@@ -448,15 +448,15 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
     if pan_direction not in ["up", "down", "left", "right"]:
         handle_error(f"Invalid pan_direction '{pan_direction}'. Must be one of: up, down, left, right.")
 
-    # Validate configs using shared utils (common functionality in src/utils)
-    validate_image_configs(image_configs, require_image_key=False)
+    # Validate configs (pan_zoom: allow image/url OR video per item; optional enablePanZoom)
+    validate_image_configs(image_configs, require_image_key=False, allow_video=True)
 
     # Calculate dimensions (handles None values with defaults)
     width, height = calculate_dimensions(aspect_ratio, quality)
     if aspect_ratio or quality:
         print(f"Using dimensions: {width}x{height} ({aspect_ratio or 'default ratio'}, {quality or 'default quality'})")
 
-    print(f"Pan-zoom settings: zoom={zoom_level}x, pan={pan_distance_ratio*100:.0f}%, dir={pan_direction} (per-image overrides)")
+    print(f"Pan-zoom settings: zoom={zoom_level}x, pan={pan_distance_ratio*100:.0f}%, dir={pan_direction} (per-item overrides, enablePanZoom per item)")
 
     # Ensure output directory and resolve path
     output_path = _resolve_output_path(output_path)
@@ -464,16 +464,11 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
     all_frames = []
 
     for idx, config in enumerate(image_configs):
-        # Support both 'image' and 'url' keys; per-image direction (fallback to root/global)
-        image_path = config.get('image') or config.get('url')
-        seconds = config.get('seconds', 5.0)
-        direction = config.get('direction') or pan_direction
-
-        # Load image
-        print(f"\n[{idx+1}/{len(image_configs)}] Loading: {image_path}")
-        main_image = load_and_resize_image(image_path, width, height, cleanup_manager)
-
-        print(f"  Direction: {direction}, Duration: {seconds}s")
+        is_video = "video" in config
+        media_path = config.get("video") if is_video else (config.get("image") or config.get("url"))
+        seconds = config.get("seconds", 5.0)
+        direction = config.get("direction") or pan_direction
+        enable_pan_zoom = config.get("enablePanZoom", True)
 
         # Optional avatar video (green screen character; download/process/overlay)
         avatar_frames = []
@@ -484,18 +479,37 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
                 avatar_video, seconds, width, height, cleanup_manager
             )
 
-        # Generate pan-zoom frames for this image
-        frames = create_pan_zoom_animation(
-            main_image, width, height, seconds, direction,
-            zoom_level=zoom_level, pan_distance_ratio=pan_distance_ratio
-        )
+        if is_video:
+            # Video: use first N seconds, letterboxed; then apply pan-zoom only if enabled
+            print(f"\n[{idx+1}/{len(image_configs)}] Loading video: {media_path} (first {seconds}s)")
+            frames = load_video_frames(media_path, seconds, width, height, cleanup_manager)
+            if enable_pan_zoom:
+                frames = apply_pan_zoom_to_frames(
+                    frames, width, height, direction,
+                    zoom_level=zoom_level, pan_distance_ratio=pan_distance_ratio
+                )
+                print(f"  Direction: {direction}, Pan-zoom: enabled, {len(frames)} frames")
+            else:
+                print(f"  Pan-zoom: disabled, {len(frames)} frames")
+        else:
+            # Image: load and either pan-zoom or static hold
+            print(f"\n[{idx+1}/{len(image_configs)}] Loading image: {media_path}")
+            main_image = load_and_resize_image(media_path, width, height, cleanup_manager)
+            if enable_pan_zoom:
+                print(f"  Direction: {direction}, Duration: {seconds}s, Pan-zoom: enabled")
+                frames = create_pan_zoom_animation(
+                    main_image, width, height, seconds, direction,
+                    zoom_level=zoom_level, pan_distance_ratio=pan_distance_ratio
+                )
+            else:
+                print(f"  Duration: {seconds}s, Pan-zoom: disabled (static)")
+                frames = create_static_hold_frames(main_image, duration_seconds=seconds)
 
-        # Composite avatar frames onto animation (bottom 1/3 of video)
+        # Composite avatar frames onto segment (bottom 1/3 of video)
         if avatar_frames:
             for f_idx, frame in enumerate(frames):
                 if f_idx < len(avatar_frames):
                     av = avatar_frames[f_idx]
-                    # Resize to occupy bottom 1/3 height, keep aspect, center x
                     target_h = height // 3
                     scale = target_h / av.shape[0]
                     target_w = int(av.shape[1] * scale)
@@ -504,7 +518,6 @@ def create_pan_zoom_video(image_configs, output_path, cleanup_manager=None,
                     y = height - ah
                     x = (width - aw) // 2
                     roi = frame[y:y+ah, x:x+aw]
-                    # Mask non-black (fg) from avatar (low thresh preserves dark hair)
                     gray = cv2.cvtColor(av_resized, cv2.COLOR_BGR2GRAY)
                     _, mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
                     mask_inv = cv2.bitwise_not(mask)
